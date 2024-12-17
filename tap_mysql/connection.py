@@ -1,32 +1,33 @@
 #!/usr/bin/env python3
 # pylint: disable=missing-docstring,arguments-differ,missing-function-docstring
 
+import logging
+import ssl
+
 import backoff
 import pymysql
-import ssl
 import singer
-
 from pymysql.constants import CLIENT
 
-LOGGER = singer.get_logger('tap_mysql')
+internal_logger = logging.getLogger("internal")
+user_logger = logging.getLogger("user")
 
 CONNECT_TIMEOUT_SECONDS = 30
 
 # We need to hold onto this for self-signed SSL
 MATCH_HOSTNAME = ssl.match_hostname
-MARIADB_ENGINE = 'mariadb'
-MYSQL_ENGINE = 'mysql'
+MARIADB_ENGINE = "mariadb"
+MYSQL_ENGINE = "mysql"
 
-DEFAULT_SESSION_SQLS = ['SET @@session.time_zone="+0:00"',
-                        'SET @@session.wait_timeout=28800',
-                        'SET @@session.net_read_timeout=3600',
-                        'SET @@session.innodb_lock_wait_timeout=3600']
+DEFAULT_SESSION_SQLS = [
+    'SET @@session.time_zone="+0:00"',
+    "SET @@session.wait_timeout=28800",
+    "SET @@session.net_read_timeout=3600",
+    "SET @@session.innodb_lock_wait_timeout=3600",
+]
 
 
-@backoff.on_exception(backoff.expo,
-                      (pymysql.err.OperationalError),
-                      max_tries=5,
-                      factor=2)
+@backoff.on_exception(backoff.expo, (pymysql.err.OperationalError), max_tries=5, factor=2)
 def connect_with_backoff(connection):
     connection.connect()
     run_session_sqls(connection)
@@ -43,12 +44,12 @@ def run_session_sqls(connection):
             try:
                 run_sql(connection, sql)
             except pymysql.err.InternalError as exc:
-                warnings.append(f'Could not set session variable `{sql}`: {exc}')
+                warnings.append(f"Could not set session variable `{sql}`: {exc}")
 
     if warnings:
-        LOGGER.warning('Encountered non-fatal errors when configuring session that could impact performance:')
+        internal_logger.warning("Encountered non-fatal errors when configuring session that could impact performance:")
     for warning in warnings:
-        LOGGER.warning(warning)
+        internal_logger.warning(warning)
 
 
 def run_sql(connection, sql):
@@ -102,7 +103,7 @@ class MySQLConnection(pymysql.connections.Connection):
         use_self_signed_ssl = config.get("ssl_ca") and config.get("ssl_cert") and config.get("ssl_key")
 
         if use_self_signed_ssl:
-            LOGGER.info("Using custom certificate authority")
+            internal_logger.info("Using custom certificate authority")
 
             # The SSL module requires files not data, so we have to write out the
             # data to files. After testing with `tempfile.NamedTemporaryFile`
@@ -110,13 +111,13 @@ class MySQLConnection(pymysql.connections.Connection):
             # names were > 99 chars long in some cases. Since the box is ephemeral,
             # we don't need to worry about cleaning them up.
             with open("ca.pem", "wb") as ca_file:
-                ca_file.write(config["ssl_ca"].encode('utf-8'))
+                ca_file.write(config["ssl_ca"].encode("utf-8"))
 
             with open("cert.pem", "wb") as cert_file:
-                cert_file.write(config["ssl_cert"].encode('utf-8'))
+                cert_file.write(config["ssl_cert"].encode("utf-8"))
 
             with open("key.pem", "wb") as key_file:
-                key_file.write(config["ssl_key"].encode('utf-8'))
+                key_file.write(config["ssl_key"].encode("utf-8"))
 
             ssl_arg = {
                 "ca": "./ca.pem",
@@ -127,13 +128,15 @@ class MySQLConnection(pymysql.connections.Connection):
             # override match hostname for google cloud
             if config.get("internal_hostname"):
                 parsed_hostname = parse_internal_hostname(config["internal_hostname"])
-                ssl.match_hostname = lambda cert, hostname: MATCH_HOSTNAME(cert, parsed_hostname)# pylint: disable=W1505
+                ssl.match_hostname = lambda cert, hostname: MATCH_HOSTNAME(
+                    cert, parsed_hostname
+                )  # pylint: disable=W1505
 
         super().__init__(defer_connect=True, ssl=ssl_arg, **args)
 
         # Attempt SSL
-        if config.get("ssl") == 'true' and not use_self_signed_ssl:
-            LOGGER.info("Attempting SSL connection")
+        if config.get("ssl") == "true" and not use_self_signed_ssl:
+            internal_logger.info("Attempting SSL connection")
             self.ssl = True
             self.ctx = ssl.create_default_context()
             self.ctx.check_hostname = False
@@ -153,7 +156,7 @@ class MySQLConnection(pymysql.connections.Connection):
 def make_connection_wrapper(config):
     class ConnectionWrapper(MySQLConnection):
         def __init__(self, *args, **kwargs):  # pylint: disable=unused-argument
-            config["cursorclass"] = kwargs.get('cursorclass')
+            config["cursorclass"] = kwargs.get("cursorclass")
             super().__init__(config)
 
             connect_with_backoff(self)
@@ -190,4 +193,5 @@ def fetch_server_uuid(mysql_conn: MySQLConnection) -> str:
             cur.execute("SELECT @@server_uuid")
             server_uuid = cur.fetchone()[0]
 
+            return server_uuid
             return server_uuid
