@@ -1,0 +1,5 @@
+{
+  "name": "tap-mysql",
+  "variant": "transferwise",
+  "pip_url": "git+https://github.com/olbycom/pipelinewise-tap-mysql.git@nekt"
+}
