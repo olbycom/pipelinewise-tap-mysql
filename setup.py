@@ -26,6 +26,7 @@ setup(
         "plpygis==0.2.1",
         "tzlocal==2.1",
         "custom-logger @ git+https://github.com/olbycom/nekt-custom-logger-module.git@v0.0.2#egg=custom-logger",
+        "PyYAML==6.0.2",
     ],
     extras_require={"test": ["nose==1.3.*", "pylint==2.13.2", "nose-cov==1.6"]},
     entry_points="""
