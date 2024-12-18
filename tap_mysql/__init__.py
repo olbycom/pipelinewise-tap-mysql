@@ -20,6 +20,17 @@ from tap_mysql.discover_utils import discover_catalog, resolve_catalog
 from tap_mysql.stream_utils import write_schema_message
 from tap_mysql.sync_strategies import binlog, common, full_table, incremental
 
+
+def _load_yaml_logging_config(path):
+    with path.open() as f:
+        return yaml.safe_load(f)
+
+
+if "SINGER_SDK_LOG_CONFIG" in os.environ:
+    log_config_path = Path(os.environ["SINGER_SDK_LOG_CONFIG"])
+    logging.config.dictConfig(_load_yaml_logging_config(log_config_path))
+
+
 internal_logger = logging.getLogger("internal")
 user_logger = logging.getLogger("user")
 
@@ -395,17 +406,8 @@ def main_impl():
         raise ValueError("Hmm I don't know what to do! Neither discovery nor sync mode was selected.")
 
 
-def _load_yaml_logging_config(path):
-    with path.open() as f:
-        return yaml.safe_load(f)
-
-
 def main():
     try:
-        if "SINGER_SDK_LOG_CONFIG" in os.environ:
-            log_config_path = Path(os.environ["SINGER_SDK_LOG_CONFIG"])
-            logging.config.dictConfig(_load_yaml_logging_config(log_config_path))
-
         main_impl()
     except Exception as exc:
         user_logger.error(f"Sync failed. Error: {exc}")
