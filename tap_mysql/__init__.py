@@ -1,10 +1,13 @@
 # pylint: disable=missing-docstring,too-many-locals
 import copy
 import logging
-from typing import Dict
+import os
+from pathlib import Path
+from typing import TYPE_CHECKING, Dict
 
 import pymysql
 import singer
+import yaml
 from singer import metadata, metrics
 from singer.catalog import Catalog
 from tap_mysql.connection import (
@@ -392,8 +395,17 @@ def main_impl():
         raise ValueError("Hmm I don't know what to do! Neither discovery nor sync mode was selected.")
 
 
+def _load_yaml_logging_config(path):
+    with path.open() as f:
+        return yaml.safe_load(f)
+
+
 def main():
     try:
+        if "SINGER_SDK_LOG_CONFIG" in os.environ:
+            log_config_path = Path(os.environ["SINGER_SDK_LOG_CONFIG"])
+            logging.config.dictConfig(_load_yaml_logging_config(log_config_path))
+
         main_impl()
     except Exception as exc:
         user_logger.error(f"Sync failed. Error: {exc}")
