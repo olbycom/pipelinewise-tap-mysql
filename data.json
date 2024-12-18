@@ -1,5 +1,6 @@
 {
   "name": "tap-mysql",
   "variant": "transferwise",
+  "executable": "tap-mysql",
   "pip_url": "-e ./extract/tap-mysql"
 }
