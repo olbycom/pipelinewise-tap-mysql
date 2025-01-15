@@ -2,18 +2,16 @@
 
 import collections
 import itertools
-import logging
 from typing import Dict, List, Optional, Set, Tuple
 
 import pendulum
 import pymysql
+from custom_logger import internal_logger, user_logger
 from singer import Schema, metadata
 from singer.catalog import Catalog, CatalogEntry
+
 from tap_mysql.connection import MySQLConnection, connect_with_backoff
 from tap_mysql.sync_strategies import common
-
-internal_logger = logging.getLogger("internal")
-user_logger = logging.getLogger("user")
 
 Column = collections.namedtuple(
     "Column",

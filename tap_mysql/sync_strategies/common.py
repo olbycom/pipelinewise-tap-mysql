@@ -2,15 +2,13 @@
 # pylint: disable=missing-function-docstring,too-many-arguments,too-many-locals
 import copy
 import datetime
-import logging
 import time
 
 import singer
+from custom_logger import user_logger
 from singer import metadata, metrics, utils
-from tap_mysql.stream_utils import get_key_properties
 
-internal_logger = logging.getLogger("internal")
-user_logger = logging.getLogger("user")
+from tap_mysql.stream_utils import get_key_properties
 
 
 def escape(string):

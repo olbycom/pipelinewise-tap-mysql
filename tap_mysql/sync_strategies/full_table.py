@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 # pylint: disable=too-many-locals,missing-function-docstring
 
-import logging
-
 import singer
+from custom_logger import internal_logger, user_logger
 from singer import metadata
+
 from tap_mysql.connection import connect_with_backoff
 from tap_mysql.sync_strategies import binlog, common
-
-internal_logger = logging.getLogger("internal")
-user_logger = logging.getLogger("user")
 
 
 def generate_bookmark_keys(catalog_entry):

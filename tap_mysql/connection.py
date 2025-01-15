@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 # pylint: disable=missing-docstring,arguments-differ,missing-function-docstring
 
-import logging
 import ssl
 
 import backoff
 import pymysql
 import singer
+from custom_logger import internal_logger
 from pymysql.constants import CLIENT
-
-internal_logger = logging.getLogger("internal")
-user_logger = logging.getLogger("user")
 
 CONNECT_TIMEOUT_SECONDS = 30
 

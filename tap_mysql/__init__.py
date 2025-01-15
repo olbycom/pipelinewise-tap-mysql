@@ -1,15 +1,21 @@
 # pylint: disable=missing-docstring,too-many-locals
 import copy
-import logging
 import os
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict
 
+import custom_logger
+
+_ = custom_logger
+
+
 import pymysql
 import singer
-import yaml
+from custom_logger import internal_logger, user_logger
 from singer import metadata, metrics
 from singer.catalog import Catalog
+
 from tap_mysql.connection import (
     MYSQL_ENGINE,
     MySQLConnection,
@@ -19,20 +25,6 @@ from tap_mysql.connection import (
 from tap_mysql.discover_utils import discover_catalog, resolve_catalog
 from tap_mysql.stream_utils import write_schema_message
 from tap_mysql.sync_strategies import binlog, common, full_table, incremental
-
-
-def _load_yaml_logging_config(path):
-    with path.open() as f:
-        return yaml.safe_load(f)
-
-
-if "SINGER_SDK_LOG_CONFIG" in os.environ:
-    log_config_path = Path(os.environ["SINGER_SDK_LOG_CONFIG"])
-    logging.config.dictConfig(_load_yaml_logging_config(log_config_path))
-
-
-internal_logger = logging.getLogger("internal")
-user_logger = logging.getLogger("user")
 
 REQUIRED_CONFIG_KEYS = ["host", "port", "user", "password"]
 
@@ -195,9 +187,9 @@ def do_sync_incremental(mysql_conn, catalog_entry, state, columns):
     replication_key = md_map.get((), {}).get("replication-key")
 
     if not replication_key:
-        raise Exception(
-            f"Cannot use INCREMENTAL replication for table ({catalog_entry.stream}) without a replication key."
-        )
+        msg = f"Cannot use INCREMENTAL replication for table ({catalog_entry.stream}) without a replication key."
+        user_logger.error(msg)
+        raise Exception(msg)
 
     write_schema_message(catalog_entry=catalog_entry, bookmark_properties=[replication_key])
 
@@ -216,7 +208,9 @@ def do_sync_historical_binlog(mysql_conn, catalog_entry, state, columns, use_gti
     is_view = common.get_is_view(catalog_entry)
 
     if is_view:
-        raise Exception(f"Unable to replicate stream({catalog_entry.stream}) with binlog because it is a view.")
+        msg = f"Unable to replicate stream({catalog_entry.stream}) with binlog because it is a view."
+        user_logger.error(msg)
+        raise Exception(msg)
 
     log_file = singer.get_bookmark(state, catalog_entry.tap_stream_id, "log_file")
 
@@ -412,4 +406,4 @@ def main():
     except Exception as exc:
         user_logger.error(f"Sync failed. Error: {exc}")
         internal_logger.error(f"Execution failed: {exc}", exc_info=True)
-        raise exc
+        sys.exit(1)

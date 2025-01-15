@@ -3,7 +3,6 @@ import codecs
 import copy
 import datetime
 import json
-import logging
 import random
 import re
 import socket
@@ -14,6 +13,7 @@ import pymysql.err
 import pytz
 import singer
 import tzlocal
+from custom_logger import internal_logger
 from plpygis import Geometry
 from pymysqlreplication import BinLogStreamReader
 from pymysqlreplication.constants import FIELD_TYPE
@@ -24,6 +24,7 @@ from pymysqlreplication.row_event import (
     WriteRowsEvent,
 )
 from singer import Schema, metadata, utils
+
 from tap_mysql import connection
 from tap_mysql.connection import (
     MySQLConnection,
@@ -37,9 +38,6 @@ from tap_mysql.discover_utils import (
 )
 from tap_mysql.stream_utils import write_schema_message
 from tap_mysql.sync_strategies import common
-
-internal_logger = logging.getLogger("internal")
-user_logger = logging.getLogger("user")
 
 SDC_DELETED_AT = "_sdc_deleted_at"
 UPDATE_BOOKMARK_PERIOD = 1000

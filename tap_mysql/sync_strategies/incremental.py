@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
 # pylint: disable=missing-function-docstring
 
-import logging
-
 import pendulum
 import singer
 from singer import metadata
+
 from tap_mysql.connection import connect_with_backoff
 from tap_mysql.sync_strategies import common
-
-internal_logger = logging.getLogger("internal")
-user_logger = logging.getLogger("user")
 
 BOOKMARK_KEYS = {"replication_key", "replication_key_value", "version"}
 
