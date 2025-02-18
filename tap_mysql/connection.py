@@ -18,9 +18,11 @@ MYSQL_ENGINE = "mysql"
 
 DEFAULT_SESSION_SQLS = [
     'SET @@session.time_zone="+0:00"',
+    "SET @@session.max_execution_time=0",
     "SET @@session.wait_timeout=28800",
-    "SET @@session.net_read_timeout=3600",
-    "SET @@session.innodb_lock_wait_timeout=3600",
+    "SET @@session.net_read_timeout=7200",
+    "SET @@session.net_write_timeout=7200",
+    "SET @@session.innodb_lock_wait_timeout=7200",
 ]
 
 
@@ -198,5 +200,4 @@ def fetch_server_uuid(mysql_conn: MySQLConnection) -> str:
             cur.execute("SELECT @@server_uuid")
             server_uuid = cur.fetchone()[0]
 
-            return server_uuid
             return server_uuid
