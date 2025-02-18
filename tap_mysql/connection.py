@@ -24,7 +24,15 @@ DEFAULT_SESSION_SQLS = [
 ]
 
 
-@backoff.on_exception(backoff.expo, (pymysql.err.OperationalError), max_tries=5, factor=2)
+@backoff.on_exception(
+    backoff.expo,
+    (
+        pymysql.err.OperationalError,
+        AttributeError,
+    ),
+    max_tries=5,
+    factor=2,
+)
 def connect_with_backoff(connection):
     connection.connect()
     run_session_sqls(connection)
