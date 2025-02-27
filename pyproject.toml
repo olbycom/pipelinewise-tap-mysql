@@ -1,6 +1,6 @@
 [tool.poetry]
-name = "meltanolabs-tap-mysql"
-version = "0.0.0"
+name = "tap-mysql"
+version = "0.0.1"
 description = "`tap-mysql` is a Singer tap for mysql, built with the Meltano Singer SDK."
 authors = ["Meltano Team and Contributors <hello@meltano.com>"]
 maintainers = ["Meltano Team and Contributors <hello@meltano.com>"]
@@ -32,71 +32,51 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.9"
+python = ">=3.11,<4.0"
 fs-s3fs = { version = "==1.1.1", optional = true }
 singer-sdk = { version="~=0.43.1" }
-pymysql = "==1.1.1"
-sqlalchemy = "<2"
-sshtunnel = "0.4.0"
-
-# Binary client for MySQL
-mysqlclient = { version = "==2.2.4", optional = true }
-
+sqlalchemy = "^2.0.36"
+sshtunnel = "^0.4.0"
+paramiko = "^3.5.0"
+custom-logger = {git = "https://github.com/olbycom/nekt-custom-logger-module.git", rev = "v0.0.7"}
+meltano-db = {git = "https://github.com/olbycom/nekt-meltano-db-helper.git", rev = "main"}
+pymysql = "^1.1.1"
 [tool.poetry.group.dev.dependencies]
-faker = ">=20"
-pytest = ">=7.3.2"
+pytest = ">=8"
 singer-sdk = { version="~=0.43.1", extras = ["testing"] }
-remote-pdb=">=2.1.0"
-
-[tool.poetry.group.typing.dependencies]
-mypy = ">=1.8.0"
-sqlalchemy = { version = "<2", extras = ["mypy"] }
-types-paramiko = ">=3.4.0.20240120"
+hypothesis = "^6.122.4"
 
 [tool.poetry.extras]
 s3 = ["fs-s3fs"]
-binary = ["mysqlclient"]
+
+[tool.pytest.ini_options]
+addopts = '--durations=10'
 
 [tool.mypy]
 python_version = "3.12"
 warn_unused_configs = true
-plugins = "sqlalchemy.ext.mypy.plugin"  # TODO: Remove this when SQLAlchemy 2.0 is supported
+plugins = "sqlmypy"
 
 [tool.ruff]
-src = ["tap_mysql"]
 target-version = "py39"
-
-[[tool.mypy.overrides]]
-ignore_missing_imports = true
-module = [
-    "sshtunnel.*",  # https://github.com/pahaz/sshtunnel/issues/265
-]
 
 [tool.ruff.lint]
 ignore = [
-    # Conflict with Ruff's formatter
-    "COM812",
+    "COM812",  # missing-trailing-comma
+    "ISC001",  # single-line-implicit-string-concatenation
 ]
 select = ["ALL"]
 
 [tool.ruff.lint.flake8-annotations]
 allow-star-arg-any = true
 
-[tool.ruff.lint.isort]
-known-first-party = ["tap_mysql"]
-
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
 [build-system]
-requires = ["poetry-core==1.9.0", "poetry-dynamic-versioning"]
-build-backend = "poetry_dynamic_versioning.backend"
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
 # CLI declaration
 tap-mysql = 'tap_mysql.tap:TapMySQL.cli'
-
-[tool.poetry-dynamic-versioning]
-enable = true
-vcs = "git"
-style = "pep440"

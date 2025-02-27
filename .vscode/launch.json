@@ -1,0 +1,66 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run",
+            "type": "debugpy",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "program": "tap_mysql",
+            "justMyCode": false,
+            "args": [
+                "--config",
+                ".secrets/config.json",
+                "--catalog",
+                ".secrets/catalog.json",
+                "--state",
+                ".secrets/state.json",
+            ],
+            "env": {
+                "MELTANO_DATABASE_URI": "postgresql://nekt:nekt@localhost:5432/nekt?options=-csearch_path%3Dmeltano"
+            }
+        },
+        {
+            "name": "Run (Save)",
+            "type": "debugpy",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "program": "tap_mysql",
+            "justMyCode": false,
+            "args": [
+                "--config",
+                ".secrets/config.json",
+                "--catalog",
+                ".secrets/catalog.json",
+                "--state",
+                ".secrets/state.json",
+                ">",
+                "output/data.jsonl",
+            ],
+            "env": {
+                "MELTANO_DATABASE_URI": "postgresql://nekt:nekt@localhost:5432/nekt?options=-csearch_path%3Dmeltano"
+            }
+        },
+        {
+            "name": "Discover",
+            "type": "debugpy",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "program": "tap_mysql",
+            "justMyCode": false,
+            "args": [
+                "--config",
+                ".secrets/config.json",
+                "--discover",
+                ">",
+                "output/catalog.json",
+            ],
+            "env": {
+                "MELTANO_DATABASE_URI": "postgresql://nekt:nekt@localhost:5432/nekt?options=-csearch_path%3Dmeltano"
+            }
+        },
+    ]
+}

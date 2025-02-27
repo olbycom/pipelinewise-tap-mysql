@@ -3,30 +3,44 @@
 from __future__ import annotations
 
 import atexit
+import concurrent.futures
+import copy
 import io
+import os
 import signal
 import sys
+import threading
 from functools import cached_property
 from typing import TYPE_CHECKING, Any, cast
 
 import paramiko
-from singer_sdk import SQLTap, Stream
+from custom_logger import internal_logger, user_logger
+from meltano_db.db_helper import MeltanoDBHelper
+from singer_sdk import SQLStream, SQLTap, Stream
 from singer_sdk import typing as th  # JSON schema typing helpers
+from singer_sdk._singerlib import Catalog, Metadata, Schema, StateMessage
 from sqlalchemy.engine import URL
 from sqlalchemy.engine.url import make_url
 from sshtunnel import SSHTunnelForwarder
 
 from tap_mysql.client import MySQLConnector, MySQLStream
+from tap_mysql.ssh_tunnel import SSHTunnelForwarder
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
+
+    from singer_sdk._singerlib.encoding._simple import Message
+
+
+lock = threading.Lock()
 
 
 class TapMySQL(SQLTap):
-    """Singer tap for MySQL."""
-
     name = "tap-mysql"
     default_stream_class = MySQLStream
+    earliest_lsn: str | None = None
+    latest_lsn_value: str | None = None
+    db_helper: MeltanoDBHelper
 
     def __init__(
         self,
@@ -39,6 +53,8 @@ class TapMySQL(SQLTap):
         See https://github.com/meltano/sdk/pull/1525
         """
         super().__init__(*args, **kwargs)
+        self.db_helper = MeltanoDBHelper(db_uri=os.getenv("MELTANO_DATABASE_URI"))
+
         sql_alchemy_url_exists = self.config.get("sqlalchemy_url") is not None
         individual_url_params_exist = all(
             [
@@ -49,62 +65,45 @@ class TapMySQL(SQLTap):
             ]
         )
         if not (sql_alchemy_url_exists or individual_url_params_exist):
-            msg = (
-                "Need either the sqlalchemy_url to be set or host, port, "
-                "user, and password to be set"
-            )
-            raise ValueError(msg)
+            msg = "Need either the sqlalchemy_url to be set or host, port, user, and password to be set"
+            user_logger.error(msg)
+            sys.exit(1)
 
     config_jsonschema = th.PropertiesList(
         th.Property(
             "host",
             th.StringType,
-            description=(
-                "Hostname for mysql instance. "
-                "Note if sqlalchemy_url is set this will be ignored."
-            ),
+            description=("Hostname for mysql instance. Note if sqlalchemy_url is set this will be ignored."),
         ),
         th.Property(
             "port",
             th.IntegerType,
             default=3306,
             description=(
-                "The port on which mysql is awaiting connection. "
-                "Note if sqlalchemy_url is set this will be ignored."
+                "The port on which mysql is awaiting connection. Note if sqlalchemy_url is set this will be ignored."
             ),
         ),
         th.Property(
             "user",
             th.StringType,
-            description=(
-                "User name used to authenticate. "
-                "Note if sqlalchemy_url is set this will be ignored."
-            ),
+            description=("User name used to authenticate. Note if sqlalchemy_url is set this will be ignored."),
         ),
         th.Property(
             "password",
             th.StringType,
             secret=True,
-            description=(
-                "Password used to authenticate. "
-                "Note if sqlalchemy_url is set this will be ignored."
-            ),
+            description=("Password used to authenticate. Note if sqlalchemy_url is set this will be ignored."),
         ),
         th.Property(
             "database",
             th.StringType,
-            description=(
-                "Database name. Note if sqlalchemy_url is set this will be ignored."
-            ),
+            description=("Database name. Note if sqlalchemy_url is set this will be ignored."),
         ),
         th.Property(
-            "sqlalchemy_options",
-            th.ObjectType(additional_properties=th.StringType),
-            description=(
-                "sqlalchemy_url options (also called the query), to connect to "
-                "PlanetScale you must turn on SSL see PlanetScale information "
-                "below. Note if sqlalchemy_url is set this will be ignored."
-            ),
+            "streams_in_parallel",
+            th.IntegerType,
+            default=1,
+            description="Optional. Maximum number of streams in parallel.",
         ),
         th.Property(
             "sqlalchemy_url",
@@ -142,41 +141,45 @@ class TapMySQL(SQLTap):
                 th.Property(
                     "enable",
                     th.BooleanType,
-                    required=True,
+                    required=False,
                     default=False,
                     description=(
-                        "Enable an ssh tunnel (also known as bastion host), see the "
+                        "Enable an ssh tunnel (also known as bastion server), see the "
                         "other ssh_tunnel.* properties for more details"
                     ),
                 ),
                 th.Property(
                     "host",
                     th.StringType,
-                    required=True,
-                    description=(
-                        "Host of the bastion host, this is the host "
-                        "we'll connect to via ssh"
-                    ),
+                    required=False,
+                    description="Host of the bastion server, this is the host we'll connect to via ssh",
                 ),
                 th.Property(
                     "username",
                     th.StringType,
-                    required=True,
-                    description="Username to connect to bastion host",
+                    required=False,
+                    description="Username to connect to bastion server",
                 ),
                 th.Property(
                     "port",
                     th.IntegerType,
-                    required=True,
+                    required=False,
                     default=22,
-                    description="Port to connect to bastion host",
+                    description="Port to connect to bastion server",
+                ),
+                th.Property(
+                    "password",
+                    th.StringType,
+                    required=False,
+                    secret=True,
+                    description="Password for authentication to the bastion server",
                 ),
                 th.Property(
                     "private_key",
                     th.StringType,
-                    required=True,
+                    required=False,
                     secret=True,
-                    description="Private Key for authentication to the bastion host",
+                    description="Private Key for authentication to the bastion server",
                 ),
                 th.Property(
                     "private_key_password",
@@ -184,13 +187,97 @@ class TapMySQL(SQLTap):
                     required=False,
                     secret=True,
                     default=None,
-                    description=(
-                        "Private Key Password, leave None if no password is set"
-                    ),
+                    description="Private Key Password, leave None if no password is set",
+                ),
+                th.Property(
+                    "run_tunnel_auth_interactive_dumb",
+                    th.BooleanType,
+                    required=False,
+                    default=False,
+                    description=("Enable dumb interaction on auth for ssh tunnel"),
                 ),
             ),
             required=False,
             description="SSH Tunnel Configuration, this is a json object",
+        ),
+        th.Property(
+            "ssl_enable",
+            th.BooleanType,
+            default=False,
+            description=(
+                "Whether or not to use ssl to verify the server's identity. Use"
+                + " ssl_certificate_authority and ssl_mode for further customization."
+                + " To use a client certificate to authenticate yourself to the server,"
+                + " use ssl_client_certificate_enable instead."
+                + " Note if sqlalchemy_url is set this will be ignored."
+            ),
+        ),
+        th.Property(
+            "ssl_client_certificate_enable",
+            th.BooleanType,
+            default=False,
+            description=(
+                "Whether or not to provide client-side certificates as a method of"
+                + " authentication to the server. Use ssl_client_certificate and"
+                + " ssl_client_private_key for further customization. To use SSL to"
+                + " verify the server's identity, use ssl_enable instead."
+                + " Note if sqlalchemy_url is set this will be ignored."
+            ),
+        ),
+        th.Property(
+            "ssl_mode",
+            th.StringType,
+            default="verify-full",
+            description=(
+                "SSL Protection method, see [postgres documentation](https://www.postgresql.org/docs/current/libpq-ssl.html#LIBPQ-SSL-PROTECTION)"
+                + " for more information. Must be one of disable, allow, prefer,"
+                + " require, verify-ca, or verify-full."
+                + " Note if sqlalchemy_url is set this will be ignored."
+            ),
+        ),
+        th.Property(
+            "ssl_certificate_authority",
+            th.StringType,
+            default="~/.postgresql/root.crl",
+            description=(
+                "The certificate authority that should be used to verify the server's"
+                + " identity. Can be provided either as the certificate itself (in"
+                + " .env) or as a filepath to the certificate."
+                + " Note if sqlalchemy_url is set this will be ignored."
+            ),
+        ),
+        th.Property(
+            "ssl_client_certificate",
+            th.StringType,
+            default="~/.postgresql/postgresql.crt",
+            description=(
+                "The certificate that should be used to verify your identity to the"
+                + " server. Can be provided either as the certificate itself (in .env)"
+                + " or as a filepath to the certificate."
+                + " Note if sqlalchemy_url is set this will be ignored."
+            ),
+        ),
+        th.Property(
+            "ssl_client_private_key",
+            th.StringType,
+            default="~/.postgresql/postgresql.key",
+            description=(
+                "The private key for the certificate you provided. Can be provided"
+                + " either as the certificate itself (in .env) or as a filepath to the"
+                + " certificate."
+                + " Note if sqlalchemy_url is set this will be ignored."
+            ),
+        ),
+        th.Property(
+            "ssl_storage_directory",
+            th.StringType,
+            default=".secrets",
+            description=(
+                "The folder in which to store SSL certificates provided as raw values."
+                + " When a certificate/key is provided as a raw value instead of as a"
+                + " filepath, it must be written to a file before it can be used. This"
+                + " configuration option determines where that file is created."
+            ),
         ),
     ).to_dict()
 
@@ -210,17 +297,59 @@ class TapMySQL(SQLTap):
             host=config["host"],
             port=config["port"],
             database=config["database"],
-            query=config.get("sqlalchemy_options"),  # type: ignore[arg-type]
+            query=self.get_sqlalchemy_query(config=config),
         )
         return cast(str, sqlalchemy_url)
 
+    def get_sqlalchemy_query(self, config: Mapping[str, Any]) -> dict:
+        query = {}
+
+        # ssl_enable is for verifying the server's identity to the client.
+        if config["ssl_enable"]:
+            ssl_mode = config["ssl_mode"]
+            query.update({"sslmode": ssl_mode})
+            query["sslrootcert"] = self.filepath_or_certificate(
+                value=config["ssl_certificate_authority"],
+                alternative_name=config["ssl_storage_directory"] + "/root.crt",
+            )
+
+        # ssl_client_certificate_enable is for verifying the client's identity to the
+        # server.
+        if config["ssl_client_certificate_enable"]:
+            query["sslcert"] = self.filepath_or_certificate(
+                value=config["ssl_client_certificate"],
+                alternative_name=config["ssl_storage_directory"] + "/cert.crt",
+            )
+            query["sslkey"] = self.filepath_or_certificate(
+                value=config["ssl_client_private_key"],
+                alternative_name=config["ssl_storage_directory"] + "/pkey.key",
+                restrict_permissions=True,
+            )
+        return query
+
+    def filepath_or_certificate(
+        self,
+        value: str,
+        alternative_name: str,
+        restrict_permissions: bool = False,
+    ) -> str:
+        if os.path.isfile(value):
+            return value
+
+        with open(alternative_name, "wb") as alternative_file:
+            alternative_file.write(
+                value.replace("\\n", "\n")
+                .replace(" ", "")
+                .replace("-----BEGINCERTIFICATE-----", "-----BEGIN CERTIFICATE-----")
+                .replace("-----ENDCERTIFICATE-----", "-----END CERTIFICATE-----")
+            )
+        if restrict_permissions:
+            os.chmod(alternative_name, 0o600)
+
+        return alternative_name
+
     @cached_property
     def connector(self) -> MySQLConnector:
-        """Get a configured connector for this Tap.
-
-        Connector is a singleton (one instance is used by the Tap and Streams).
-
-        """
         url = make_url(self.get_sqlalchemy_url(config=self.config))
         ssh_config = self.config.get("ssh_tunnel", {})
 
@@ -234,20 +363,6 @@ class TapMySQL(SQLTap):
         )
 
     def guess_key_type(self, key_data: str) -> paramiko.PKey:
-        """Guess the type of the private key.
-
-        We are duplicating some logic from the ssh_tunnel package here,
-        we could try to use their function instead.
-
-        Args:
-            key_data: The private key data to guess the type of.
-
-        Returns:
-            The private key object.
-
-        Raises:
-            ValueError: If the key type could not be determined.
-        """
         for key_class in (
             paramiko.RSAKey,
             paramiko.DSSKey,
@@ -274,15 +389,25 @@ class TapMySQL(SQLTap):
         Returns:
             The new URL to connect to, using the tunnel.
         """
+        if ssh_config.get("password"):
+            credentials = {
+                "ssh_password": ssh_config.get("password"),
+            }
+        else:
+            credentials = {
+                "ssh_private_key": self.guess_key_type(ssh_config["private_key"]),
+                "ssh_private_key_password": ssh_config.get("private_key_password"),
+            }
+
         self.ssh_tunnel: SSHTunnelForwarder = SSHTunnelForwarder(
             ssh_address_or_host=(ssh_config["host"], ssh_config["port"]),
             ssh_username=ssh_config["username"],
-            ssh_private_key=self.guess_key_type(ssh_config["private_key"]),
-            ssh_private_key_password=ssh_config.get("private_key_password"),
             remote_bind_address=(url.host, url.port),
+            run_tunnel_auth_interactive_dumb=ssh_config.get("run_tunnel_auth_interactive_dumb", False),
+            **credentials,
         )
         self.ssh_tunnel.start()
-        self.logger.info("SSH Tunnel started")
+        internal_logger.info("SSH Tunnel started")
         # On program exit clean up, want to also catch signals
         atexit.register(self.clean_up)
         signal.signal(signal.SIGTERM, self.catch_signal)
@@ -296,26 +421,14 @@ class TapMySQL(SQLTap):
         )
 
     def clean_up(self) -> None:
-        """Stop the SSH Tunnel."""
-        self.logger.info("Shutting down SSH Tunnel")
+        internal_logger.info("Shutting down SSH Tunnel")
         self.ssh_tunnel.stop()
 
     def catch_signal(self, signum, frame) -> None:  # noqa: ANN001 ARG002
-        """Catch signals and exit cleanly.
-
-        Args:
-            signum: The signal number
-            frame: The current stack frame
-        """
         sys.exit(1)  # Calling this to be sure atexit is called, so clean_up gets called
 
     @property
     def catalog_dict(self) -> dict:
-        """Get catalog dictionary.
-
-        Returns:
-            The tap's catalog as a dict
-        """
         if self._catalog_dict:
             return self._catalog_dict
 
@@ -328,13 +441,124 @@ class TapMySQL(SQLTap):
         self._catalog_dict: dict = result
         return self._catalog_dict
 
-    def discover_streams(self) -> list[Stream]:
-        """Initialize all available streams and return them as a list.
+    @property
+    def catalog(self) -> Catalog:
+        """Get the tap's working catalog.
+
+        Override to do LOG_BASED modifications.
 
         Returns:
-            List of discovered Stream objects.
+            A Singer catalog object.
         """
-        return [
-            MySQLStream(self, catalog_entry, connector=self.connector)
-            for catalog_entry in self.catalog_dict["streams"]
-        ]
+        new_catalog: Catalog = Catalog()
+        modified_streams: list = []
+        for stream in super().catalog.streams:
+            stream_modified = False
+            new_stream = copy.deepcopy(stream)
+            if new_stream.replication_method == "LOG_BASED" and new_stream.schema.properties:
+                for property in new_stream.schema.properties.values():
+                    if "null" not in property.type:
+                        if isinstance(property.type, list):
+                            property.type.append("null")
+                        else:
+                            property.type = [property.type, "null"]
+                if new_stream.schema.required:
+                    stream_modified = True
+                    new_stream.schema.required = None
+                if "_sdc_deleted_at" not in new_stream.schema.properties:
+                    stream_modified = True
+                    new_stream.schema.properties.update({"_sdc_deleted_at": Schema(type=["string", "null"])})
+                    new_stream.metadata.update(
+                        {("properties", "_sdc_deleted_at"): Metadata(Metadata.InclusionType.AVAILABLE, True, None)}
+                    )
+                if "_sdc_lsn" not in new_stream.schema.properties:
+                    stream_modified = True
+                    new_stream.schema.properties.update({"_sdc_lsn": Schema(type=["integer", "null"])})
+                    new_stream.metadata.update(
+                        {("properties", "_sdc_lsn"): Metadata(Metadata.InclusionType.AVAILABLE, True, None)}
+                    )
+            if stream_modified:
+                modified_streams.append(new_stream.tap_stream_id)
+            new_catalog.add_stream(new_stream)
+        if modified_streams:
+            internal_logger.info(
+                "One or more LOG_BASED catalog entries were modified "
+                f"({modified_streams=}) to allow nullability and include _sdc columns. "
+                "See README for further information."
+            )
+        return new_catalog
+
+    def discover_streams(self) -> Sequence[Stream]:
+        streams: list[SQLStream] = []
+        for catalog_entry in self.catalog_dict["streams"]:
+            if catalog_entry["replication_method"] == "LOG_BASED":
+                continue  # TODO: add binlog stream
+            else:
+                streams.append(MySQLStream(self, catalog_entry, connector=self.connector))
+        return streams
+
+    def write_message(self, message: "Message") -> None:
+        with lock:
+            sys.stdout.write(self.format_message(message) + "\n")
+            sys.stdout.flush()
+
+    def sync_all(self):
+        # TODO: Re-add once binlog is available
+        # try:
+        #     self.latest_lsn_value = self.get_replication_slot_value(self.config.get("replication_slot_name", "nekt"))
+        # except:
+        #     self.latest_lsn_value = None
+        # self.earliest_lsn = self.db_helper.get_live_config_property("log_based_lsn")
+
+        # if self.earliest_lsn:
+        #     self.flush_lsn_for_log_based(self.earliest_lsn)
+
+        self._reset_state_progress_markers()
+        self._set_compatible_replication_methods()
+        self.write_message(StateMessage(value=self.state))
+
+        max_threads = self.config.get("streams_in_parallel", 1)
+
+        def stream_func(stream):
+            try:
+                stream.sync()
+                stream.finalize_state_progress_markers()
+            except Exception as e:
+                internal_logger.error(f"Error syncing stream '{stream.name}': {e}")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
+            futures = []
+            for stream in self.streams.values():
+                if not stream.selected and not stream.has_selected_descendents:
+                    internal_logger.info("Skipping deselected stream '%s'.", stream.name)
+                    continue
+
+                if stream.parent_stream_type:
+                    internal_logger.debug(
+                        "Child stream '%s' is expected to be called "
+                        "by parent stream '%s'. "
+                        "Skipping direct invocation.",
+                        type(stream).__name__,
+                        stream.parent_stream_type.__name__,
+                    )
+                    continue
+
+                futures.append(executor.submit(stream_func, stream))
+
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    internal_logger.error(f"Error in thread execution: {e}")
+
+        for stream in self.streams.values():
+            stream.log_sync_costs()
+
+        # TODO: Re-add once binlog is available
+        # if self.latest_lsn_value:
+        #     with lock:
+        #         self.db_helper.update_live_config_property("log_based_lsn", self.latest_lsn_value)
+
+
+if __name__ == "__main__":
+    TapMySQL.cli()
