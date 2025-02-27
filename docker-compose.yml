@@ -1,54 +1,49 @@
-version: '3.7'
-
+---
+# docker compose -f docker-compose.yml up -d
+version: "2.1"
 services:
-  mariadb_server1:
-    container_name: "mariadb_server1"
-    image: mariadb:10.6
-    volumes:
-      - ./dev/init.sql:/docker-entrypoint-initdb.d/init.sql
+  mysqldb:
+    image: mysql
+    restart: always
+    command: --default-authentication-plugin=mysql_native_password --bind-address=0.0.0.0
     environment:
-      MYSQL_ROOT_PASSWORD: my-secret-passwd
-      MYSQL_DATABASE: tap_mysql_test
-      MYSQL_USER: replication_user
-      MYSQL_PASSWORD: secret123passwd
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: melty
+      MYSQL_ROOT_HOST: '%'
     ports:
-      - "3306:3306"
-    command:
-      --server-id=1
-      --default-authentication-plugin=mysql_native_password
-      --log-bin=mysql-bin
-      --binlog-format=ROW
-    networks:
-      - mariadb-cluster
-
-  mysql_server:
-    container_name: 'mysql_server'
-    image: mysql:5.7
-    ports:
-      - "3307:3306"
+      - 3306:3306
+  mysqldb_ssh:
+    image: mysql
+    restart: always
+    command: --default-authentication-plugin=mysql_native_password --bind-address=0.0.0.0
     environment:
-      MYSQL_ROOT_PASSWORD: master1
-      MYSQL_DATABASE: tap_mysql_test
-      MYSQL_USER: replication_user
-      MYSQL_PASSWORD: secret123passwd
-    volumes:
-      - ./dev/init.sql:/docker-entrypoint-initdb.d/init.sql
-    command:
-      - --server-id=1
-      - --gtid-mode=ON
-      - --enforce-gtid-consistency=ON
-      - --master-info-repository=TABLE
-      - --relay-log-info-repository=TABLE
-      - --binlog-checksum=NONE
-      - --log-slave-updates=ON
-      - --log-bin=binlog
-      - --binlog-format=ROW
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: melty
+      MYSQL_ROOT_HOST: '%'
     networks:
-      - mariadb-cluster
+      inner:
+        ipv4_address: 10.5.0.5
+  ssh:
+    image: ghcr.io/linuxserver/openssh-server:9.1_p1-r2-ls106 # This docker repo has added breaking changes a lot in the last month, pinning this.
+    hostname: openssh-server
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - PUBLIC_KEY_FILE=/config/ssh_host_keys/ssh_host_rsa_key.pub
+      - SUDO_ACCESS=true
+      - PASSWORD_ACCESS=false
+      - USER_NAME=melty
+    volumes:
+      - ./ssh_tunnel/ssh-server-config:/config/ssh_host_keys:ro
+    ports:
+      - "127.0.0.1:2223:2222"
+    networks:
+      - inner
 
 networks:
-  mariadb-cluster:
+  inner:
+    driver: bridge
     ipam:
-      driver: default
-      config:
-        - subnet: 172.100.0.0/24
+     config:
+       - subnet: 10.5.0.0/16
+         gateway: 10.5.0.1
