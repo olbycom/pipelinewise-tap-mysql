@@ -41,6 +41,7 @@ paramiko = "^3.5.0"
 custom-logger = {git = "https://github.com/olbycom/nekt-custom-logger-module.git", rev = "v0.0.7"}
 meltano-db = {git = "https://github.com/olbycom/nekt-meltano-db-helper.git", rev = "main"}
 pymysql = "^1.1.1"
+mysql-replication = "^1.0.9"
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8"
 singer-sdk = { version="~=0.43.1", extras = ["testing"] }

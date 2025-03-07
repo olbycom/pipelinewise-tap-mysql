@@ -23,7 +23,7 @@ from sqlalchemy.engine import URL
 from sqlalchemy.engine.url import make_url
 from sshtunnel import SSHTunnelForwarder
 
-from tap_mysql.client import MySQLConnector, MySQLStream
+from tap_mysql.client import MySQLConnector, MySQLLogBasedStream, MySQLStream
 from tap_mysql.ssh_tunnel import SSHTunnelForwarder
 
 if TYPE_CHECKING:
@@ -467,7 +467,9 @@ class TapMySQL(SQLTap):
                     new_stream.schema.required = None
                 if "_sdc_deleted_at" not in new_stream.schema.properties:
                     stream_modified = True
-                    new_stream.schema.properties.update({"_sdc_deleted_at": Schema(type=["string", "null"])})
+                    new_stream.schema.properties.update(
+                        {"_sdc_deleted_at": Schema(type=["string", "null"], format="date-time")}
+                    )
                     new_stream.metadata.update(
                         {("properties", "_sdc_deleted_at"): Metadata(Metadata.InclusionType.AVAILABLE, True, None)}
                     )
@@ -492,7 +494,7 @@ class TapMySQL(SQLTap):
         streams: list[SQLStream] = []
         for catalog_entry in self.catalog_dict["streams"]:
             if catalog_entry["replication_method"] == "LOG_BASED":
-                continue  # TODO: add binlog stream
+                streams.append(MySQLLogBasedStream(self, catalog_entry, connector=self.connector))
             else:
                 streams.append(MySQLStream(self, catalog_entry, connector=self.connector))
         return streams
@@ -502,16 +504,35 @@ class TapMySQL(SQLTap):
             sys.stdout.write(self.format_message(message) + "\n")
             sys.stdout.flush()
 
-    def sync_all(self):
-        # TODO: Re-add once binlog is available
-        # try:
-        #     self.latest_lsn_value = self.get_replication_slot_value(self.config.get("replication_slot_name", "nekt"))
-        # except:
-        #     self.latest_lsn_value = None
-        # self.earliest_lsn = self.db_helper.get_live_config_property("log_based_lsn")
+    def get_replication_slot_value(self, slot_name):
+        with self.connector._connect_logical() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SHOW BINARY LOG STATUS
+                    """
+                )
+                result = cur.fetchone()
+                return result[0] if result else None
 
-        # if self.earliest_lsn:
-        #     self.flush_lsn_for_log_based(self.earliest_lsn)
+    def flush_lsn_for_log_based(self, flush_lsn):
+        with self.connector._connect_logical() as conn:
+            with conn.cursor() as cur:
+                slot_name = self.config.get("replication_slot_name", "nekt")
+                cur.execute("PURGE BINARY LOGS TO %s;", (slot_name))
+                conn.commit()
+                result = cur.fetchone()
+                internal_logger.info(f"Replication slot {slot_name} advanced to {result[0]}")
+
+    def sync_all(self):
+        try:
+            self.latest_lsn_value = self.get_replication_slot_value(self.config.get("replication_slot_name", "nekt"))
+        except:
+            self.latest_lsn_value = None
+        self.earliest_lsn = self.db_helper.get_live_config_property("log_based_lsn")
+
+        if self.earliest_lsn:
+            self.flush_lsn_for_log_based(self.earliest_lsn)
 
         self._reset_state_progress_markers()
         self._set_compatible_replication_methods()
@@ -526,38 +547,58 @@ class TapMySQL(SQLTap):
             except Exception as e:
                 internal_logger.error(f"Error syncing stream '{stream.name}': {e}")
 
+        log_based_streams = []
+        non_log_based_streams = []
+
+        for stream in self.streams.values():
+            if not stream.selected and not stream.has_selected_descendents:
+                internal_logger.info("Skipping deselected stream '%s'.", stream.name)
+                continue
+
+            if stream.parent_stream_type:
+                internal_logger.debug(
+                    "Child stream '%s' is expected to be called "
+                    "by parent stream '%s'. "
+                    "Skipping direct invocation.",
+                    type(stream).__name__,
+                    stream.parent_stream_type.__name__,
+                )
+                continue
+
+            if isinstance(stream, MySQLLogBasedStream):
+                log_based_streams.append(stream)
+            else:
+                non_log_based_streams.append(stream)
+
+        internal_logger.info(f"Processing {len(non_log_based_streams)} non-LOG_BASED streams in parallel")
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
             futures = []
-            for stream in self.streams.values():
-                if not stream.selected and not stream.has_selected_descendents:
-                    internal_logger.info("Skipping deselected stream '%s'.", stream.name)
-                    continue
-
-                if stream.parent_stream_type:
-                    internal_logger.debug(
-                        "Child stream '%s' is expected to be called "
-                        "by parent stream '%s'. "
-                        "Skipping direct invocation.",
-                        type(stream).__name__,
-                        stream.parent_stream_type.__name__,
-                    )
-                    continue
-
+            for stream in non_log_based_streams:
                 futures.append(executor.submit(stream_func, stream))
 
             for future in concurrent.futures.as_completed(futures):
                 try:
                     future.result()
                 except Exception as e:
-                    internal_logger.error(f"Error in thread execution: {e}")
+                    user_logger.error(f"Error in thread execution: {e}")
+                    sys.exit(1)
+
+        # Process LOG_BASED streams sequentially to avoid replication slot conflicts
+        internal_logger.info(f"Processing {len(log_based_streams)} LOG_BASED streams sequentially")
+        for stream in log_based_streams:
+            internal_logger.info(f"Processing LOG_BASED stream '{stream.name}'")
+            try:
+                stream_func(stream)
+            except Exception as e:
+                user_logger.error(f"Error processing LOG_BASED stream '{stream.name}': {e}")
+                sys.exit(1)
 
         for stream in self.streams.values():
             stream.log_sync_costs()
 
-        # TODO: Re-add once binlog is available
-        # if self.latest_lsn_value:
-        #     with lock:
-        #         self.db_helper.update_live_config_property("log_based_lsn", self.latest_lsn_value)
+        if self.latest_lsn_value:
+            with lock:
+                self.db_helper.update_live_config_property("log_based_lsn", self.latest_lsn_value)
 
 
 if __name__ == "__main__":

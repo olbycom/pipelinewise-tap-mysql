@@ -974,6 +974,21 @@ files = [
 ]
 
 [[package]]
+name = "mysql-replication"
+version = "1.0.9"
+description = "Pure Python Implementation of MySQL replication protocol build on top of PyMYSQL."
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "mysql_replication-1.0.9.tar.gz", hash = "sha256:eb5603256cc18892bbccce30b6e7c800ec8f6bfe4e44add79f9b88d222322064"},
+]
+
+[package.dependencies]
+packaging = "*"
+pymysql = ">=1.1.0"
+
+[[package]]
 name = "nh3"
 version = "0.2.21"
 description = "Python binding to Ammonia HTML sanitizer Rust crate"
@@ -2002,4 +2017,4 @@ s3 = ["fs-s3fs"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<4.0"
-content-hash = "d4a98384e78ad29f137718b3ba690680fb006c983bfad66d4e6c1b7470795444"
+content-hash = "1ca8a1a35a9fada8f511ca6a7e51090187f65fb50e66b8873b4969fc64739caa"
