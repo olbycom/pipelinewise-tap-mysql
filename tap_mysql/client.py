@@ -289,12 +289,16 @@ class MySQLConnector(SQLConnector):
             if schema_name in exclude_schemas:
                 continue
 
-            primary_keys = inspected.get_multi_pk_constraint(schema=schema_name)
+            try:
+                primary_keys = inspected.get_multi_pk_constraint(schema=schema_name)
 
-            if reflect_indices:
-                indices = inspected.get_multi_indexes(schema=schema_name)
-            else:
-                indices = {}
+                if reflect_indices:
+                    indices = inspected.get_multi_indexes(schema=schema_name)
+                else:
+                    indices = {}
+            except Exception as e:
+                user_logger.warning(f"Error discovering catalog entries for schema={schema_name}: {e}")
+                continue
 
             for object_kind, is_view in object_kinds:
                 try:
