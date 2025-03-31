@@ -42,6 +42,7 @@ custom-logger = {git = "https://github.com/olbycom/nekt-custom-logger-module.git
 meltano-db = {git = "https://github.com/olbycom/nekt-meltano-db-helper.git", rev = "main"}
 pymysql = "^1.1.1"
 mysql-replication = "^1.0.9"
+python-dateutil = "^2.9.0.post0"
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8"
 singer-sdk = { version="~=0.43.1", extras = ["testing"] }
