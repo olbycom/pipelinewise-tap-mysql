@@ -175,7 +175,8 @@ class MySQLConnector(SQLConnector):
     def get_schema_names(self, engine: Engine, inspected: Inspector) -> list[str]:
         if "filter_schemas" in self.config and len(self.config["filter_schemas"]) != 0:
             return self.config["filter_schemas"]
-        return super().get_schema_names(engine, inspected)
+        schemas = super().get_schema_names(engine, inspected)
+        return [schema for schema in schemas if schema != "information_schema"]
 
     def discover_catalog_entry(
         self,
