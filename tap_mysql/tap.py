@@ -22,7 +22,6 @@ from singer_sdk._singerlib import Catalog, Metadata, Schema, StateMessage
 from sqlalchemy.engine import URL
 from sqlalchemy.engine.url import make_url
 from sshtunnel import SSHTunnelForwarder
-
 from tap_mysql.client import MySQLConnector, MySQLLogBasedStream, MySQLStream
 from tap_mysql.ssh_tunnel import SSHTunnelForwarder
 
@@ -546,6 +545,7 @@ class TapMySQL(SQLTap):
                 stream.finalize_state_progress_markers()
             except Exception as e:
                 internal_logger.error(f"Error syncing stream '{stream.name}': {e}")
+                sys.exit(1)
 
         log_based_streams = []
         non_log_based_streams = []
