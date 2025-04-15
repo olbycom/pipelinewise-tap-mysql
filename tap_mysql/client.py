@@ -405,6 +405,11 @@ class MySQLConnector(SQLConnector):
                 poolclass=QueuePool,
                 pool_size=self.pool_size,
                 max_overflow=self.pool_size * 2,
+                pool_recycle=3600,
+                connect_args={
+                    "connect_timeout": 600,
+                    "read_timeout": 3600,
+                },
             )
         except TypeError:
             internal_logger.exception(
