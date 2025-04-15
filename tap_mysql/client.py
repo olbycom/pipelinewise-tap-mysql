@@ -407,6 +407,7 @@ class MySQLConnector(SQLConnector):
                 max_overflow=self.pool_size * 2,
                 pool_recycle=3600,
                 connect_args={
+                    "max_allowed_packet": 134217728,  # 128MB
                     "connect_timeout": 600,
                     "read_timeout": 3600,
                 },
