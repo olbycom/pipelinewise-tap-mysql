@@ -405,7 +405,8 @@ class MySQLConnector(SQLConnector):
                 poolclass=QueuePool,
                 pool_size=self.pool_size,
                 max_overflow=self.pool_size * 2,
-                pool_recycle=3600,
+                pool_recycle=300,
+                pool_pre_ping=True,
                 connect_args={
                     "max_allowed_packet": 134217728,  # 128MB
                     "connect_timeout": 600,
