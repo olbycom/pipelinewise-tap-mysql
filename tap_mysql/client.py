@@ -443,30 +443,45 @@ class MySQLStream(SQLStream):
             self.fully_qualified_name,
             column_names=selected_column_names,
         )
-        query = table.select()
-        if self.replication_key:
-            replication_key_col = table.columns[self.replication_key]
-            query = query.order_by(replication_key_col)
 
-            start_val = self.get_starting_replication_key_value(context)
-            if start_val:
-                query = query.where(replication_key_col >= start_val)
+        # Add limits and offsets for chunking
+        chunk_size = 1000  # Adjust based on your data size
+        offset = 0
+        more_records = True
 
-        with self.connector._connect() as conn:  # noqa: SLF001
-            user_logger.info(f"Getting records for query: '{query}'")
-            if self.connector.is_vitess:  # type: ignore[attr-defined]
-                conn.exec_driver_sql(
-                    "set workload=olap"
-                )  # See https://github.com/planetscale/discussion/discussions/190
+        while more_records:
+            query = table.select().limit(chunk_size).offset(offset)
+            if self.replication_key:
+                replication_key_col = table.columns[self.replication_key]
+                query = query.order_by(replication_key_col)
 
-            for record in conn.execute(query).mappings():
-                # TODO: Standardize record mapping type
-                # https://github.com/meltano/sdk/issues/2096
-                transformed_record = self.post_process(dict(record))
-                if transformed_record is None:
-                    # Record filtered out during post_process()
-                    continue
-                yield transformed_record
+                start_val = self.get_starting_replication_key_value(context)
+                if start_val:
+                    query = query.where(replication_key_col >= start_val)
+
+            with self.connector._connect() as conn:
+                user_logger.info(f"Getting records for query: '{query}' - offset: {offset}")
+                if self.connector.is_vitess:
+                    conn.exec_driver_sql("set workload=olap")
+
+                # Don't materialize the entire result set as a list
+                result_proxy = conn.execute(query)
+                record_count = 0
+
+                # Process each record one at a time
+                for record in result_proxy.mappings():
+                    record_count += 1
+                    transformed_record = self.post_process(dict(record))
+                    if transformed_record is None:
+                        continue
+                    yield transformed_record
+
+                # Check if we need to fetch another chunk
+                more_records = record_count == chunk_size
+                offset += record_count
+
+                # Close the cursor explicitly
+                result_proxy.close()
 
 
 class MySQLLogBasedStream(SQLStream):
