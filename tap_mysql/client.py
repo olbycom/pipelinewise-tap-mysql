@@ -445,7 +445,7 @@ class MySQLStream(SQLStream):
         )
 
         # Add limits and offsets for chunking
-        chunk_size = 1000  # Adjust based on your data size
+        chunk_size = 100000  # Adjust based on your data size
         offset = 0
         more_records = True
 
