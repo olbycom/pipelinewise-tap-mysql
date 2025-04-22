@@ -22,6 +22,7 @@ from singer_sdk._singerlib import Catalog, Metadata, Schema, StateMessage
 from sqlalchemy.engine import URL
 from sqlalchemy.engine.url import make_url
 from sshtunnel import SSHTunnelForwarder
+
 from tap_mysql.client import MySQLConnector, MySQLLogBasedStream, MySQLStream
 from tap_mysql.ssh_tunnel import SSHTunnelForwarder
 
@@ -276,6 +277,14 @@ class TapMySQL(SQLTap):
                 + " When a certificate/key is provided as a raw value instead of as a"
                 + " filepath, it must be written to a file before it can be used. This"
                 + " configuration option determines where that file is created."
+            ),
+        ),
+        th.Property(
+            "chunk_size",
+            th.IntegerType,
+            default=0,
+            description=(
+                "The number of rows to fetch at a time. If set to 0, the tap will fetch all rows at once (no chunking)."
             ),
         ),
     ).to_dict()
