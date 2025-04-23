@@ -431,6 +431,9 @@ class MySQLStream(SQLStream):
     # JSONB Objects won't be selected without type_confomance_level to ROOT_ONLY
     TYPE_CONFORMANCE_LEVEL = TypeConformanceLevel.ROOT_ONLY
 
+    def is_sorted(self) -> bool:
+        return False if self.config["chunk_size"] > 0 else True
+
     def get_records(self, context: dict | None) -> Iterable[dict[str, Any]]:
         if context:
             msg = f"Stream '{self.name}' does not support partitioning."
