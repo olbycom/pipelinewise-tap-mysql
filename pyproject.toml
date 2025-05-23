@@ -34,18 +34,16 @@ packages = [
 [tool.poetry.dependencies]
 python = ">=3.11,<4.0"
 fs-s3fs = { version = "==1.1.1", optional = true }
-singer-sdk = { version="~=0.43.1" }
 sqlalchemy = "^2.0.36"
 sshtunnel = "^0.4.0"
 paramiko = "^3.5.0"
-custom-logger = {git = "https://github.com/olbycom/nekt-custom-logger-module.git", rev = "v0.0.7"}
 meltano-db = {git = "https://github.com/olbycom/nekt-meltano-db-helper.git", rev = "main"}
 pymysql = "^1.1.1"
 mysql-replication = "^1.0.9"
 python-dateutil = "^2.9.0.post0"
+nekt-singer-sdk = {git = "https://github.com/olbycom/singer-sdk.git", rev = "v0.2.0"}
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8"
-singer-sdk = { version="~=0.43.1", extras = ["testing"] }
 hypothesis = "^6.122.4"
 
 [tool.poetry.extras]

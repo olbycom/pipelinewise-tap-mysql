@@ -14,11 +14,10 @@ from functools import cached_property
 from typing import TYPE_CHECKING, Any, cast
 
 import paramiko
-from custom_logger import internal_logger, user_logger
 from meltano_db.db_helper import MeltanoDBHelper
-from singer_sdk import SQLStream, SQLTap, Stream
-from singer_sdk import typing as th  # JSON schema typing helpers
-from singer_sdk._singerlib import Catalog, Metadata, Schema, StateMessage
+from nekt_singer_sdk import SQLStream, SQLTap, Stream
+from nekt_singer_sdk import typing as th  # JSON schema typing helpers
+from nekt_singer_sdk.singerlib import Catalog, Metadata, Schema, StateMessage
 from sqlalchemy.engine import URL
 from sqlalchemy.engine.url import make_url
 from sshtunnel import SSHTunnelForwarder
@@ -29,7 +28,7 @@ from tap_mysql.ssh_tunnel import SSHTunnelForwarder
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from singer_sdk._singerlib.encoding._simple import Message
+    from nekt_singer_sdk.singerlib.encoding.simple import Message
 
 
 lock = threading.Lock()
@@ -66,7 +65,7 @@ class TapMySQL(SQLTap):
         )
         if not (sql_alchemy_url_exists or individual_url_params_exist):
             msg = "Need either the sqlalchemy_url to be set or host, port, user, and password to be set"
-            user_logger.error(msg)
+            self.user_logger.error(msg)
             sys.exit(1)
 
     config_jsonschema = th.PropertiesList(
@@ -366,6 +365,7 @@ class TapMySQL(SQLTap):
             url = self.ssh_tunnel_connect(ssh_config=ssh_config, url=url)
 
         return MySQLConnector(
+            is_running_discovery=self.is_running_discovery,
             config=dict(self.config),
             sqlalchemy_url=url.render_as_string(hide_password=False),
         )
@@ -415,7 +415,7 @@ class TapMySQL(SQLTap):
             **credentials,
         )
         self.ssh_tunnel.start()
-        internal_logger.info("SSH Tunnel started")
+        self.internal_logger.info("SSH Tunnel started")
         # On program exit clean up, want to also catch signals
         atexit.register(self.clean_up)
         signal.signal(signal.SIGTERM, self.catch_signal)
@@ -429,7 +429,7 @@ class TapMySQL(SQLTap):
         )
 
     def clean_up(self) -> None:
-        internal_logger.info("Shutting down SSH Tunnel")
+        self.internal_logger.info("Shutting down SSH Tunnel")
         self.ssh_tunnel.stop()
 
     def catch_signal(self, signum, frame) -> None:  # noqa: ANN001 ARG002
@@ -491,7 +491,7 @@ class TapMySQL(SQLTap):
                 modified_streams.append(new_stream.tap_stream_id)
             new_catalog.add_stream(new_stream)
         if modified_streams:
-            internal_logger.info(
+            self.internal_logger.info(
                 "One or more LOG_BASED catalog entries were modified "
                 f"({modified_streams=}) to allow nullability and include _sdc columns. "
                 "See README for further information."
@@ -530,7 +530,7 @@ class TapMySQL(SQLTap):
                 cur.execute("PURGE BINARY LOGS TO %s;", (slot_name))
                 conn.commit()
                 result = cur.fetchone()
-                internal_logger.info(f"Replication slot {slot_name} advanced to {result[0]}")
+                self.internal_logger.info(f"Replication slot {slot_name} advanced to {result[0]}")
 
     def sync_all(self):
         try:
@@ -553,7 +553,7 @@ class TapMySQL(SQLTap):
                 stream.sync()
                 stream.finalize_state_progress_markers()
             except Exception as e:
-                internal_logger.error(f"Error syncing stream '{stream.name}': {e}")
+                self.internal_logger.exception(f"Error syncing stream '{stream.name}': {e}")
                 sys.exit(1)
 
         log_based_streams = []
@@ -561,16 +561,14 @@ class TapMySQL(SQLTap):
 
         for stream in self.streams.values():
             if not stream.selected and not stream.has_selected_descendents:
-                internal_logger.info("Skipping deselected stream '%s'.", stream.name)
+                self.internal_logger.info(f"Skipping deselected stream '{stream.name}'.")
                 continue
 
             if stream.parent_stream_type:
-                internal_logger.debug(
-                    "Child stream '%s' is expected to be called "
-                    "by parent stream '%s'. "
-                    "Skipping direct invocation.",
-                    type(stream).__name__,
-                    stream.parent_stream_type.__name__,
+                self.internal_logger.debug(
+                    f"Child stream '{type(stream).__name__}' is expected to be called "
+                    f"by parent stream '{stream.parent_stream_type.__name__}'. "
+                    "Skipping direct invocation."
                 )
                 continue
 
@@ -579,7 +577,7 @@ class TapMySQL(SQLTap):
             else:
                 non_log_based_streams.append(stream)
 
-        internal_logger.info(f"Processing {len(non_log_based_streams)} non-LOG_BASED streams in parallel")
+        self.internal_logger.info(f"Processing {len(non_log_based_streams)} non-LOG_BASED streams in parallel")
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
             futures = []
             for stream in non_log_based_streams:
@@ -589,17 +587,17 @@ class TapMySQL(SQLTap):
                 try:
                     future.result()
                 except Exception as e:
-                    user_logger.error(f"Error in thread execution: {e}")
+                    self.user_logger.error(f"Error in thread execution: {e}")
                     sys.exit(1)
 
         # Process LOG_BASED streams sequentially to avoid replication slot conflicts
-        internal_logger.info(f"Processing {len(log_based_streams)} LOG_BASED streams sequentially")
+        self.internal_logger.info(f"Processing {len(log_based_streams)} LOG_BASED streams sequentially")
         for stream in log_based_streams:
-            internal_logger.info(f"Processing LOG_BASED stream '{stream.name}'")
+            self.internal_logger.info(f"Processing LOG_BASED stream '{stream.name}'")
             try:
                 stream_func(stream)
             except Exception as e:
-                user_logger.error(f"Error processing LOG_BASED stream '{stream.name}': {e}")
+                self.user_logger.error(f"Error processing LOG_BASED stream '{stream.name}': {e}")
                 sys.exit(1)
 
         for stream in self.streams.values():

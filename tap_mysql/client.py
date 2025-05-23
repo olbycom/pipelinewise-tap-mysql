@@ -7,35 +7,30 @@ import functools
 import random
 import re
 import sys
-from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Dict, Sequence, Tuple, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import singer_sdk.helpers._typing
 import sqlalchemy as sa
 import sqlalchemy.types
-from custom_logger import internal_logger, user_logger
 from dateutil import parser
+from nekt_singer_sdk import SQLConnector, SQLStream
+from nekt_singer_sdk import typing as th
+from nekt_singer_sdk.helpers._typing import TypeConformanceLevel
+from nekt_singer_sdk.singerlib import CatalogEntry, MetadataMapping, Schema
 from pymysqlreplication import BinLogStreamReader
-from pymysqlreplication.constants import FIELD_TYPE
-from pymysqlreplication.event import GtidEvent, MariadbGtidEvent, RotateEvent
 from pymysqlreplication.row_event import (
     DeleteRowsEvent,
     UpdateRowsEvent,
     WriteRowsEvent,
 )
-from singer_sdk import SQLConnector, SQLStream
-from singer_sdk import typing as th
-from singer_sdk._singerlib import CatalogEntry, MetadataMapping, Schema
-from singer_sdk.helpers._typing import TypeConformanceLevel
 from sqlalchemy import text
-from sqlalchemy.engine import reflection
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.pool import QueuePool
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from sqlalchemy.engine import Engine
+    from sqlalchemy.engine import Engine, reflection
     from sqlalchemy.engine.reflection import Inspector
 
 unpatched_conform = singer_sdk.helpers._typing._conform_primitive_property  # noqa: SLF001
@@ -65,12 +60,13 @@ class MySQLConnector(SQLConnector):
 
     def __init__(
         self,
+        is_running_discovery: bool,  # noqa: FBT001
         config: dict | None = None,
         sqlalchemy_url: str | None = None,
     ) -> None:
         self.pool_size = config.get("streams_in_parallel", 20) * 2
         self.is_vitess = config.get("is_vitess")
-        super().__init__(config=config, sqlalchemy_url=sqlalchemy_url)
+        super().__init__(is_running_discovery=is_running_discovery, config=config, sqlalchemy_url=sqlalchemy_url)
 
     @staticmethod
     def to_jsonschema_type(
@@ -272,60 +268,6 @@ class MySQLConnector(SQLConnector):
             replication_key=None,  # Must be defined by user
         )
 
-    def discover_catalog_entries(
-        self,
-        *,
-        exclude_schemas: Sequence[str] = (),
-        reflect_indices: bool = True,
-    ) -> list[dict]:
-        result: list[dict] = []
-        engine = self._engine
-        inspected = sa.inspect(engine)
-        object_kinds = (
-            (reflection.ObjectKind.TABLE, False),
-            (reflection.ObjectKind.ANY_VIEW, True),
-        )
-        for schema_name in self.get_schema_names(engine, inspected):
-            if schema_name in exclude_schemas:
-                continue
-
-            try:
-                primary_keys = inspected.get_multi_pk_constraint(schema=schema_name)
-
-                if reflect_indices:
-                    indices = inspected.get_multi_indexes(schema=schema_name)
-                else:
-                    indices = {}
-            except Exception as e:
-                user_logger.warning(f"Error discovering catalog entries for schema={schema_name}: {e}")
-                continue
-
-            for object_kind, is_view in object_kinds:
-                try:
-                    columns = inspected.get_multi_columns(
-                        schema=schema_name,
-                        kind=object_kind,
-                    )
-
-                    result.extend(
-                        self.discover_catalog_entry(
-                            engine,
-                            inspected,
-                            schema_name,
-                            table,
-                            is_view,
-                            reflected_columns=columns[schema, table],
-                            reflected_pk=primary_keys.get((schema, table)),
-                            reflected_indices=indices.get((schema, table), []),
-                        ).to_dict()
-                        for schema, table in columns
-                    )
-                except Exception as e:
-                    user_logger.warning(f"Error discovering catalog entries for schema={schema_name}: {e}")
-                    continue
-
-        return result
-
     def get_sqlalchemy_type(self, col_meta_type: str) -> sa.Column:
         """Return a SQLAlchemy type object for the given SQL type.
 
@@ -434,7 +376,7 @@ class MySQLStream(SQLStream):
     def get_records(self, context: dict | None) -> Iterable[dict[str, Any]]:
         if context:
             msg = f"Stream '{self.name}' does not support partitioning."
-            user_logger.error(msg)
+            self._tap.user_logger.error(msg)
             sys.exit(1)
 
         # pulling rows with only selected columns from stream
@@ -533,7 +475,7 @@ class MySQLLogBasedStream(SQLStream):
         schema_dict["properties"].update({"_sdc_lsn": {"type": ["number"]}})
         return schema_dict
 
-    def get_min_server_log_file_and_pos(self) -> Tuple[str, str]:
+    def get_min_server_log_file_and_pos(self) -> tuple[str, str]:
         try:
             with self.connector._connect() as conn:
                 binary_logs = conn.execute(text("SHOW BINARY LOGS"))
@@ -595,7 +537,7 @@ class MySQLLogBasedStream(SQLStream):
 
     def handle_write_row(
         self, event: WriteRowsEvent, row: dict, selected_columns, cur_log_file: str, cur_log_pos: int
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         values = row.get("values")
         filtered_row = {col: values[col] for col in selected_columns if col in values}
 
@@ -609,7 +551,7 @@ class MySQLLogBasedStream(SQLStream):
 
     def handle_update_row(
         self, event: WriteRowsEvent, row: dict, selected_columns, cur_log_file: str, cur_log_pos: int
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         values = row.get("after_values")
         filtered_row = {col: values[col] for col in selected_columns if col in values}
 
@@ -623,7 +565,7 @@ class MySQLLogBasedStream(SQLStream):
 
     def handle_delete_row(
         self, event: WriteRowsEvent, row: dict, selected_columns, cur_log_file: str, cur_log_pos: int
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         values = row.get("values")
         filtered_row = {
             col: values[col] if col == event.primary_key else None for col in selected_columns if col in values
