@@ -995,8 +995,8 @@ singer-sdk = ">=0.46.0,<0.47.0"
 
 [package.source]
 type = "git"
-url = "https://github.com/nektcom/singer-sdk.git"
-reference = "HEAD"
+url = "https://github.com/olbycom/singer-sdk.git"
+reference = "v0.2.3"
 resolved_reference = "7b9a7928bb50e926dd82e5d0a9aa65384e9f6f00"
 
 [[package]]
@@ -2057,4 +2057,4 @@ s3 = ["fs-s3fs"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<4.0"
-content-hash = "08fd54922491693d990fb191c4d42a5695ec585fa11a1feb763ab92a8136b293"
+content-hash = "11f9988e148496c1fe16b679626a63c654963432194b7b4fab708e0f9766e547"
