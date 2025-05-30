@@ -982,7 +982,7 @@ pymysql = ">=1.1.0"
 
 [[package]]
 name = "nekt-singer-sdk"
-version = "0.2.3"
+version = "0.2.4"
 description = "Add your description here"
 optional = false
 python-versions = ">=3.11"
@@ -996,8 +996,8 @@ singer-sdk = ">=0.46.0,<0.47.0"
 [package.source]
 type = "git"
 url = "https://github.com/olbycom/singer-sdk.git"
-reference = "v0.2.3"
-resolved_reference = "7b9a7928bb50e926dd82e5d0a9aa65384e9f6f00"
+reference = "v0.2.4"
+resolved_reference = "195455152a69c9fc356c54ac8c4ef4a6571d07c9"
 
 [[package]]
 name = "nh3"
@@ -2057,4 +2057,4 @@ s3 = ["fs-s3fs"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<4.0"
-content-hash = "11f9988e148496c1fe16b679626a63c654963432194b7b4fab708e0f9766e547"
+content-hash = "a50e04e3eda3da1045e0804464be44442cb608cdb4ab9740c6596cdc3cf5fdd2"
