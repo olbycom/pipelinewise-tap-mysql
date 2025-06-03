@@ -374,6 +374,8 @@ class MySQLStream(SQLStream):
     # JSONB Objects won't be selected without type_confomance_level to ROOT_ONLY
     TYPE_CONFORMANCE_LEVEL = TypeConformanceLevel.ROOT_ONLY
 
+    is_sorted = False
+
     def get_records(self, context: dict | None) -> Iterable[dict[str, Any]]:
         if context:
             msg = f"Stream '{self.name}' does not support partitioning."
