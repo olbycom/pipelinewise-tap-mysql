@@ -15,6 +15,7 @@ import sqlalchemy.types
 from dateutil import parser
 from nekt_singer_sdk import SQLConnector, SQLStream
 from nekt_singer_sdk import typing as th
+from nekt_singer_sdk.custom_logger import internal_logger, user_logger
 from nekt_singer_sdk.helpers._typing import TypeConformanceLevel
 from nekt_singer_sdk.singerlib import CatalogEntry, MetadataMapping, Schema
 from pymysqlreplication import BinLogStreamReader
