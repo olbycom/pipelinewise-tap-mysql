@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import atexit
-import concurrent.futures
 import copy
 import io
 import os
 import signal
 import sys
-import threading
 from functools import cached_property
 from typing import TYPE_CHECKING, Any, cast
 
@@ -20,18 +18,12 @@ from nekt_singer_sdk import typing as th  # JSON schema typing helpers
 from nekt_singer_sdk.singerlib import Catalog, Metadata, Schema, StateMessage
 from sqlalchemy.engine import URL
 from sqlalchemy.engine.url import make_url
-from sshtunnel import SSHTunnelForwarder
 
 from tap_mysql.client import MySQLConnector, MySQLLogBasedStream, MySQLStream
 from tap_mysql.ssh_tunnel import SSHTunnelForwarder
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
-
-    from nekt_singer_sdk.singerlib.encoding.simple import Message
-
-
-lock = threading.Lock()
 
 
 class TapMySQL(SQLTap):
@@ -507,11 +499,6 @@ class TapMySQL(SQLTap):
                 streams.append(MySQLStream(self, catalog_entry, connector=self.connector))
         return streams
 
-    def write_message(self, message: "Message") -> None:
-        with lock:
-            sys.stdout.write(self.format_message(message) + "\n")
-            sys.stdout.flush()
-
     def get_replication_slot_value(self, slot_name):
         with self.connector._connect_logical() as conn:
             with conn.cursor() as cur:
@@ -546,8 +533,6 @@ class TapMySQL(SQLTap):
         self._set_compatible_replication_methods()
         self.write_message(StateMessage(value=self.state))
 
-        max_threads = self.config.get("streams_in_parallel", 1)
-
         def stream_func(stream):
             try:
                 stream.sync()
@@ -577,18 +562,14 @@ class TapMySQL(SQLTap):
             else:
                 non_log_based_streams.append(stream)
 
-        self.internal_logger.info(f"Processing {len(non_log_based_streams)} non-LOG_BASED streams in parallel")
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
-            futures = []
-            for stream in non_log_based_streams:
-                futures.append(executor.submit(stream_func, stream))
-
-            for future in concurrent.futures.as_completed(futures):
-                try:
-                    future.result()
-                except Exception as e:
-                    self.user_logger.error(f"Error in thread execution: {e}")
-                    sys.exit(1)
+        self.internal_logger.info(f"Processing {len(non_log_based_streams)} non-LOG_BASED streams sequentially")
+        for stream in non_log_based_streams:
+            try:
+                self.internal_logger.info(f"Processing non-LOG_BASED stream '{stream.name}'")
+                stream_func(stream)
+            except Exception as e:
+                self.user_logger.error(f"Error processing non-LOG_BASED stream '{stream.name}': {e}")
+                sys.exit(1)
 
         # Process LOG_BASED streams sequentially to avoid replication slot conflicts
         self.internal_logger.info(f"Processing {len(log_based_streams)} LOG_BASED streams sequentially")
@@ -604,8 +585,7 @@ class TapMySQL(SQLTap):
             stream.log_sync_costs()
 
         if self.latest_lsn_value:
-            with lock:
-                self.db_helper.update_live_config_property("log_based_lsn", self.latest_lsn_value)
+            self.db_helper.update_live_config_property("log_based_lsn", self.latest_lsn_value)
 
 
 if __name__ == "__main__":
