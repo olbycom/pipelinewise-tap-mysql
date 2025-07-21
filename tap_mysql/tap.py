@@ -114,6 +114,36 @@ class TapMySQL(SQLTap):
             ),
         ),
         th.Property(
+            "show_mysql_schema_on_discovery",
+            th.BooleanType,
+            default=False,
+            description=(
+                "If set to true, the tap will return the default MySQL schema on discovery. "
+                "If set to false, the tap will return the schemas specified in the "
+                "filter_schemas property."
+            ),
+        ),
+        th.Property(
+            "show_sys_schema_on_discovery",
+            th.BooleanType,
+            default=False,
+            description=(
+                "If set to true, the tap will return the sys schema on discovery. "
+                "If set to false, the tap will return the schemas specified in the "
+                "filter_schemas property."
+            ),
+        ),
+        th.Property(
+            "show_performance_schema_schema_on_discovery",
+            th.BooleanType,
+            default=False,
+            description=(
+                "If set to true, the tap will return the performance_schema schema on discovery. "
+                "If set to false, the tap will return the schemas specified in the "
+                "filter_schemas property."
+            ),
+        ),
+        th.Property(
             "is_vitess",
             th.BooleanType,
             default=None,

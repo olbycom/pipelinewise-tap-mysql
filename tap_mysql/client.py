@@ -175,7 +175,14 @@ class MySQLConnector(SQLConnector):
         if "filter_schemas" in self.config and len(self.config["filter_schemas"]) != 0:
             return self.config["filter_schemas"]
         schemas = super().get_schema_names(engine, inspected)
-        return [schema for schema in schemas if schema != "information_schema"]
+        exclude_schemas = ["information_schema", "mysql", "performance_schema", "sys"]
+        if self.config.get("show_mysql_schema_on_discovery"):
+            exclude_schemas.remove("mysql")
+        if self.config.get("show_performance_schema_schema_on_discovery"):
+            exclude_schemas.remove("performance_schema")
+        if self.config.get("show_sys_schema_on_discovery"):
+            exclude_schemas.remove("sys")
+        return [schema for schema in schemas if schema not in exclude_schemas]
 
     def discover_catalog_entry(
         self,
