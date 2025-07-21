@@ -16,6 +16,7 @@ from dateutil import parser
 from nekt_singer_sdk import SQLConnector, SQLStream
 from nekt_singer_sdk import typing as th
 from nekt_singer_sdk.custom_logger import internal_logger, user_logger
+from nekt_singer_sdk.helpers._state import increment_state
 from nekt_singer_sdk.helpers._typing import TypeConformanceLevel
 from nekt_singer_sdk.singerlib import CatalogEntry, MetadataMapping, Schema
 from pymysqlreplication import BinLogStreamReader
@@ -31,6 +32,7 @@ from sqlalchemy.pool import QueuePool
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from singer_sdk.helpers import types
     from sqlalchemy.engine import Engine, reflection
     from sqlalchemy.engine.reflection import Inspector
 
@@ -279,9 +281,7 @@ class MySQLConnector(SQLConnector):
         # Example varchar(97)
         type_info = col_meta_type.split("(")
         base_type_name = type_info[0].split(" ")[0]  # bigint unsigned
-        type_args = (
-            type_info[1].split(" ")[0].rstrip(")") if len(type_info) > 1 else None
-        )  # decimal(25,4) unsigned should work
+        type_args = type_info[1].split(" ")[0].rstrip(")") if len(type_info) > 1 else None  # decimal(25,4) unsigned should work
 
         if base_type_name in {"enum", "set"}:
             self.logger.warning(
@@ -441,9 +441,7 @@ class MySQLStream(SQLStream):
             with self.connector._connect() as conn:  # noqa: SLF001
                 user_logger.info(f"Getting records for query: '{query}'")
                 if self.connector.is_vitess:  # type: ignore[attr-defined]
-                    conn.exec_driver_sql(
-                        "set workload=olap"
-                    )  # See https://github.com/planetscale/discussion/discussions/190
+                    conn.exec_driver_sql("set workload=olap")  # See https://github.com/planetscale/discussion/discussions/190
 
                 for record in conn.execute(query).mappings():
                     # TODO: Standardize record mapping type
@@ -475,7 +473,7 @@ class MySQLLogBasedStream(SQLStream):
         if "required" in schema_dict:
             schema_dict.pop("required")
         schema_dict["properties"].update({"_sdc_deleted_at": {"type": ["string"], "format": "date-time"}})
-        schema_dict["properties"].update({"_sdc_lsn": {"type": ["number"]}})
+        schema_dict["properties"].update({"_sdc_lsn": {"type": ["integer"]}})
         return schema_dict
 
     def get_min_server_log_file_and_pos(self) -> tuple[str, str]:
@@ -488,10 +486,26 @@ class MySQLLogBasedStream(SQLStream):
                     return initial_log[0], 0
         except Exception:
             user_logger.error("Unable to replicate binlog stream because no binary logs exist on the server.")
-            internal_logger.error(
-                "Unable to replicate binlog stream because no binary logs exist on the server.", exc_info=True
-            )
+            internal_logger.error("Unable to replicate binlog stream because no binary logs exist on the server.", exc_info=True)
             sys.exit(1)
+
+    def get_log_file_from_lsn(self, lsn: int) -> tuple[str, int]:
+        """Parse the lsn to get the file name and position."""
+        # Decompose the LSN by reversing the bit-shifting
+        file_number = lsn >> 48
+        position = (lsn >> 16) & 0xFFFFFFFF  # Extract 32 bits for position
+
+        with self.connector._connect() as conn:
+            binary_logs = conn.execute(text("SHOW BINARY LOGS"))
+            for log in binary_logs:
+                log_name = log[0]
+                match = re.search(r"\.(\d+)$", log_name)
+                if match and int(match.group(1)) == file_number:
+                    return log_name, position
+
+        # Fallback or error
+        msg = f"Could not find binlog file for number {file_number}"
+        raise RuntimeError(msg)
 
     def create_binlog_stream_reader(
         self,
@@ -525,69 +539,79 @@ class MySQLLogBasedStream(SQLStream):
 
         return BinLogStreamReader(**kwargs)
 
-    def create_unique_identifier(self, file_name, position):
+    def create_unique_identifier(self, file_name: str, position: int, row_index: int = 0) -> int:
+        """Create a unique 64-bit integer to represent the LSN.
+
+        This is composed of:
+        - binlog file number (top 16 bits)
+        - binlog position (middle 32 bits)
+        - row index within the event (bottom 16 bits)
+        """
         match = re.search(r"\d+$", file_name)
-        if match:
-            file_number = int(match.group())
-        else:
-            raise ValueError("Invalid file name format")
+        if not match:
+            msg = f"Could not extract file number from binlog file name: {file_name}"
+            raise ValueError(msg)
 
-        # Adjusted multiplier based on expected max position
-        multiplier = 10**9  # For positions expected to be less than 10 million
+        file_number = int(match.group())
 
-        # Return composite integer
-        return file_number * multiplier + position
+        if file_number >= (1 << 16):
+            self.logger.warning("Binlog file number %s exceeds the 16-bit allocation.", file_number)
+        if position >= (1 << 32):
+            self.logger.warning("Binlog position %s exceeds the 32-bit allocation.", position)
+        if row_index >= (1 << 16):
+            self.logger.warning(
+                "Row index %s exceeds the 16-bit allocation. LSN may not be unique for this event.",
+                row_index,
+            )
 
-    def handle_write_row(
-        self, event: WriteRowsEvent, row: dict, selected_columns, cur_log_file: str, cur_log_pos: int
-    ) -> dict[str, Any]:
+        # Compose the LSN by bit-shifting the components
+        file_part = file_number << 48
+        pos_part = position << 16
+        row_part = row_index
+
+        return file_part + pos_part + row_part
+
+    def handle_write_row(self, event: WriteRowsEvent, row: dict, selected_columns, cur_log_file: str, cur_log_pos: int, row_index: int) -> dict[str, Any]:
         values = row.get("values")
         filtered_row = {col: values[col] for col in selected_columns if col in values}
 
         if not filtered_row:
             return
 
-        filtered_row["_sdc_lsn"] = self.create_unique_identifier(cur_log_file, cur_log_pos)
+        filtered_row["_sdc_lsn"] = self.create_unique_identifier(cur_log_file, cur_log_pos, row_index)
         filtered_row["_sdc_deleted_at"] = None
 
         return filtered_row
 
-    def handle_update_row(
-        self, event: WriteRowsEvent, row: dict, selected_columns, cur_log_file: str, cur_log_pos: int
-    ) -> dict[str, Any]:
+    def handle_update_row(self, event: UpdateRowsEvent, row: dict, selected_columns, cur_log_file: str, cur_log_pos: int, row_index: int) -> dict[str, Any]:
         values = row.get("after_values")
         filtered_row = {col: values[col] for col in selected_columns if col in values}
 
         if not filtered_row:
             return
 
-        filtered_row["_sdc_lsn"] = self.create_unique_identifier(cur_log_file, cur_log_pos)
+        filtered_row["_sdc_lsn"] = self.create_unique_identifier(cur_log_file, cur_log_pos, row_index)
         filtered_row["_sdc_deleted_at"] = None
 
         return filtered_row
 
-    def handle_delete_row(
-        self, event: WriteRowsEvent, row: dict, selected_columns, cur_log_file: str, cur_log_pos: int
-    ) -> dict[str, Any]:
+    def handle_delete_row(self, event: DeleteRowsEvent, row: dict, selected_columns, cur_log_file: str, cur_log_pos: int, row_index: int) -> dict[str, Any]:
         values = row.get("values")
-        filtered_row = {
-            col: values[col] if col == event.primary_key else None for col in selected_columns if col in values
-        }
+        filtered_row = {col: values[col] if col == event.primary_key else None for col in selected_columns if col in values}
 
         if not filtered_row:
             return
 
-        filtered_row["_sdc_lsn"] = self.create_unique_identifier(cur_log_file, cur_log_pos)
+        filtered_row["_sdc_lsn"] = self.create_unique_identifier(cur_log_file, cur_log_pos, row_index)
         filtered_row["_sdc_deleted_at"] = parser.parse(event.formatted_timestamp)
         return filtered_row
 
     def get_records(self, context: dict | None) -> Iterable[dict[str, Any]]:
-        start_lsn = self.get_starting_replication_key_value(context=context) or None
-        min_server_log_file, min_server_log_pos = self.get_min_server_log_file_and_pos()
+        start_lsn = self.get_starting_replication_key_value(context=context)
         if start_lsn:
-            log_file, log_pos = start_lsn.split(":")
+            log_file, log_pos = self.get_log_file_from_lsn(start_lsn)
         else:
-            log_file, log_pos = min_server_log_file, min_server_log_pos
+            log_file, log_pos = self.get_min_server_log_file_and_pos()
 
         reader = self.create_binlog_stream_reader(log_file=log_file, log_pos=log_pos)
         selected_columns = self.get_selected_schema()["properties"].keys()
@@ -597,20 +621,20 @@ class MySQLLogBasedStream(SQLStream):
 
             match binlog_event.__class__:
                 case _ if isinstance(binlog_event, WriteRowsEvent):
-                    for row in binlog_event.rows:
-                        row = self.handle_write_row(binlog_event, row, selected_columns, cur_log_file, cur_log_pos)
+                    for i, row in enumerate(binlog_event.rows):
+                        row = self.handle_write_row(binlog_event, row, selected_columns, cur_log_file, cur_log_pos, i)
                         if row:
                             transformed_record = self.post_process(row)
                             yield transformed_record
                 case _ if isinstance(binlog_event, UpdateRowsEvent):
-                    for row in binlog_event.rows:
-                        row = self.handle_update_row(binlog_event, row, selected_columns, cur_log_file, cur_log_pos)
+                    for i, row in enumerate(binlog_event.rows):
+                        row = self.handle_update_row(binlog_event, row, selected_columns, cur_log_file, cur_log_pos, i)
                         if row:
                             transformed_record = self.post_process(row)
                             yield transformed_record
                 case _ if isinstance(binlog_event, DeleteRowsEvent):
-                    for row in binlog_event.rows:
-                        row = self.handle_delete_row(binlog_event, row, selected_columns, cur_log_file, cur_log_pos)
+                    for i, row in enumerate(binlog_event.rows):
+                        row = self.handle_delete_row(binlog_event, row, selected_columns, cur_log_file, cur_log_pos, i)
                         if row:
                             transformed_record = self.post_process(row)
                             yield transformed_record
@@ -618,3 +642,33 @@ class MySQLLogBasedStream(SQLStream):
                     user_logger.error(f"Unsupported binlog event: {binlog_event}")
                     internal_logger.error(f"Unsupported binlog event: {binlog_event}")
                     sys.exit(1)
+
+    @property
+    def is_sorted(self) -> bool:
+        return True
+
+    def _increment_stream_state(
+        self,
+        latest_record: types.Record,
+        *,
+        context: types.Context | None = None,
+    ) -> None:
+        # This also creates a state entry if one does not yet exist:
+        state_dict = self.get_context_state(context)
+
+        # Advance state bookmark values if applicable
+        if latest_record:
+            if not self.replication_key:
+                msg = f"Could not detect replication key for '{self.name}' stream(replication method={self.replication_method})"
+                raise ValueError(msg)
+            treat_as_sorted = self.is_sorted
+            if not treat_as_sorted and self.state_partitioning_keys is not None:
+                # Streams with custom state partitioning are not resumable.
+                treat_as_sorted = False
+            increment_state(
+                state_dict,
+                replication_key=self.replication_key,
+                latest_record=latest_record,
+                is_sorted=treat_as_sorted,
+                check_sorted=self.check_sorted,
+            )

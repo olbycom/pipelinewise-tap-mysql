@@ -58,20 +58,17 @@ warn_unused_configs = true
 plugins = "sqlmypy"
 
 [tool.ruff]
-target-version = "py39"
+line-length = 160
+exclude = ["**/migrations/**"]
 
 [tool.ruff.lint]
-ignore = [
-    "COM812",  # missing-trailing-comma
-    "ISC001",  # single-line-implicit-string-concatenation
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = [
+    "D104",  # Missing docstring in public package
+    "F401",  # Imported but unused; consider removing, adding to `__all__`, or using a redundant alias
 ]
-select = ["ALL"]
-
-[tool.ruff.lint.flake8-annotations]
-allow-star-arg-any = true
-
-[tool.ruff.lint.pydocstyle]
-convention = "google"
 
 [build-system]
 requires = ["poetry-core"]
