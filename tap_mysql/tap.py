@@ -464,7 +464,7 @@ class TapMySQL(SQLTap):
         self._catalog_dict: dict = result
         return self._catalog_dict
 
-    @property
+    @cached_property
     def catalog(self) -> Catalog:
         """Get the tap's working catalog.
 
