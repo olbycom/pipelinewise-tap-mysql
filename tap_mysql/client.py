@@ -731,19 +731,8 @@ class MySQLLogBasedStream(SQLStream):
                 msg = f"Could not detect replication key for '{self.name}' stream(replication method={self.replication_method})"
                 raise ValueError(msg)
 
-            # Create a copy to avoid modifying the original record, which is already
-            # queued for output.
-            record_for_state = latest_record.copy()
-
-            # Ensure the replication key is an integer for state comparison.
-            if self.replication_key in record_for_state and isinstance(record_for_state[self.replication_key], str):
-                try:
-                    record_for_state[self.replication_key] = int(record_for_state[self.replication_key])
-                except ValueError:
-                    self.logger.warning(
-                        "Could not convert replication key '%s' to integer for state tracking.",
-                        self.replication_key,
-                    )
+            if self.replication_key in latest_record and isinstance(latest_record[self.replication_key], str):
+                latest_record[self.replication_key] = int(latest_record[self.replication_key])
 
             treat_as_sorted = self.is_sorted
             if not treat_as_sorted and self.state_partitioning_keys is not None:
@@ -752,7 +741,7 @@ class MySQLLogBasedStream(SQLStream):
             increment_state(
                 state_dict,
                 replication_key=self.replication_key,
-                latest_record=record_for_state,
+                latest_record=latest_record,
                 is_sorted=treat_as_sorted,
                 check_sorted=self.check_sorted,
             )
