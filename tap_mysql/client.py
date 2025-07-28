@@ -69,7 +69,11 @@ class MySQLConnector(SQLConnector):
     ) -> None:
         self.pool_size = config.get("streams_in_parallel", 20) * 2
         self.is_vitess = config.get("is_vitess")
-        super().__init__(is_running_discovery=is_running_discovery, config=config, sqlalchemy_url=sqlalchemy_url)
+        super().__init__(
+            is_running_discovery=is_running_discovery,
+            config=config,
+            sqlalchemy_url=sqlalchemy_url,
+        )
 
     @staticmethod
     def to_jsonschema_type(
@@ -497,12 +501,16 @@ class MySQLLogBasedStream(SQLStream):
                     return initial_log[0], 0
         except Exception:
             user_logger.error("Unable to replicate binlog stream because no binary logs exist on the server.")
-            internal_logger.error("Unable to replicate binlog stream because no binary logs exist on the server.", exc_info=True)
+            internal_logger.error(
+                "Unable to replicate binlog stream because no binary logs exist on the server.",
+                exc_info=True,
+            )
             sys.exit(1)
 
-    def get_log_file_from_lsn(self, lsn: int) -> tuple[str, int]:
+    def get_log_file_from_lsn(self, lsn: int | str) -> tuple[str, int]:
         """Parse the lsn to get the file name and position."""
         # Decompose the LSN by reversing the bit-shifting
+        lsn = int(lsn)
         file_number = lsn >> 48
         position = (lsn >> 16) & 0xFFFFFFFF  # Extract 32 bits for position
 
@@ -582,7 +590,15 @@ class MySQLLogBasedStream(SQLStream):
 
         return file_part + pos_part + row_part
 
-    def handle_write_row(self, event: WriteRowsEvent, row: dict, selected_columns, cur_log_file: str, cur_log_pos: int, row_index: int) -> dict[str, Any]:
+    def handle_write_row(
+        self,
+        event: WriteRowsEvent,
+        row: dict,
+        selected_columns,
+        cur_log_file: str,
+        cur_log_pos: int,
+        row_index: int,
+    ) -> dict[str, Any]:
         values = row.get("values")
         filtered_row = {col: values[col] for col in selected_columns if col in values}
 
@@ -594,7 +610,15 @@ class MySQLLogBasedStream(SQLStream):
 
         return filtered_row
 
-    def handle_update_row(self, event: UpdateRowsEvent, row: dict, selected_columns, cur_log_file: str, cur_log_pos: int, row_index: int) -> dict[str, Any]:
+    def handle_update_row(
+        self,
+        event: UpdateRowsEvent,
+        row: dict,
+        selected_columns,
+        cur_log_file: str,
+        cur_log_pos: int,
+        row_index: int,
+    ) -> dict[str, Any]:
         values = row.get("after_values")
         filtered_row = {col: values[col] for col in selected_columns if col in values}
 
@@ -606,7 +630,15 @@ class MySQLLogBasedStream(SQLStream):
 
         return filtered_row
 
-    def handle_delete_row(self, event: DeleteRowsEvent, row: dict, selected_columns, cur_log_file: str, cur_log_pos: int, row_index: int) -> dict[str, Any]:
+    def handle_delete_row(
+        self,
+        event: DeleteRowsEvent,
+        row: dict,
+        selected_columns,
+        cur_log_file: str,
+        cur_log_pos: int,
+        row_index: int,
+    ) -> dict[str, Any]:
         values = row.get("values")
         filtered_row = {col: values[col] if col == event.primary_key else None for col in selected_columns if col in values}
 
@@ -633,19 +665,40 @@ class MySQLLogBasedStream(SQLStream):
             match binlog_event.__class__:
                 case _ if isinstance(binlog_event, WriteRowsEvent):
                     for i, row in enumerate(binlog_event.rows):
-                        row = self.handle_write_row(binlog_event, row, selected_columns, cur_log_file, cur_log_pos, i)
+                        row = self.handle_write_row(
+                            binlog_event,
+                            row,
+                            selected_columns,
+                            cur_log_file,
+                            cur_log_pos,
+                            i,
+                        )
                         if row:
                             transformed_record = self.post_process(row)
                             yield transformed_record
                 case _ if isinstance(binlog_event, UpdateRowsEvent):
                     for i, row in enumerate(binlog_event.rows):
-                        row = self.handle_update_row(binlog_event, row, selected_columns, cur_log_file, cur_log_pos, i)
+                        row = self.handle_update_row(
+                            binlog_event,
+                            row,
+                            selected_columns,
+                            cur_log_file,
+                            cur_log_pos,
+                            i,
+                        )
                         if row:
                             transformed_record = self.post_process(row)
                             yield transformed_record
                 case _ if isinstance(binlog_event, DeleteRowsEvent):
                     for i, row in enumerate(binlog_event.rows):
-                        row = self.handle_delete_row(binlog_event, row, selected_columns, cur_log_file, cur_log_pos, i)
+                        row = self.handle_delete_row(
+                            binlog_event,
+                            row,
+                            selected_columns,
+                            cur_log_file,
+                            cur_log_pos,
+                            i,
+                        )
                         if row:
                             transformed_record = self.post_process(row)
                             yield transformed_record
@@ -677,6 +730,21 @@ class MySQLLogBasedStream(SQLStream):
             if not self.replication_key:
                 msg = f"Could not detect replication key for '{self.name}' stream(replication method={self.replication_method})"
                 raise ValueError(msg)
+
+            # Create a copy to avoid modifying the original record, which is already
+            # queued for output.
+            record_for_state = latest_record.copy()
+
+            # Ensure the replication key is an integer for state comparison.
+            if self.replication_key in record_for_state and isinstance(record_for_state[self.replication_key], str):
+                try:
+                    record_for_state[self.replication_key] = int(record_for_state[self.replication_key])
+                except ValueError:
+                    self.logger.warning(
+                        "Could not convert replication key '%s' to integer for state tracking.",
+                        self.replication_key,
+                    )
+
             treat_as_sorted = self.is_sorted
             if not treat_as_sorted and self.state_partitioning_keys is not None:
                 # Streams with custom state partitioning are not resumable.
@@ -684,7 +752,7 @@ class MySQLLogBasedStream(SQLStream):
             increment_state(
                 state_dict,
                 replication_key=self.replication_key,
-                latest_record=latest_record,
+                latest_record=record_for_state,
                 is_sorted=treat_as_sorted,
                 check_sorted=self.check_sorted,
             )
