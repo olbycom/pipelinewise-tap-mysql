@@ -484,7 +484,7 @@ class MySQLLogBasedStream(SQLStream):
         if "required" in schema_dict:
             schema_dict.pop("required")
         schema_dict["properties"].update({"_sdc_deleted_at": {"type": ["string"], "format": "date-time"}})
-        schema_dict["properties"].update({"_sdc_lsn": {"type": ["integer"]}})
+        schema_dict["properties"].update({"_sdc_lsn": {"type": ["string"]}})
         return schema_dict
 
     def get_min_server_log_file_and_pos(self) -> tuple[str, str]:
@@ -653,6 +653,11 @@ class MySQLLogBasedStream(SQLStream):
                     user_logger.error(f"Unsupported binlog event: {binlog_event}")
                     internal_logger.error(f"Unsupported binlog event: {binlog_event}")
                     sys.exit(1)
+
+    def post_process(self, row: dict, context: dict | None = None) -> dict | None:
+        if "_sdc_lsn" in row:
+            row["_sdc_lsn"] = str(row["_sdc_lsn"])
+        return row
 
     @property
     def is_sorted(self) -> bool:

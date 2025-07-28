@@ -494,7 +494,7 @@ class TapMySQL(SQLTap):
                     new_stream.metadata.update({("properties", "_sdc_deleted_at"): Metadata(Metadata.InclusionType.AVAILABLE, True, None)})
                 if "_sdc_lsn" not in new_stream.schema.properties:
                     stream_modified = True
-                    new_stream.schema.properties.update({"_sdc_lsn": Schema(type=["integer", "null"])})
+                    new_stream.schema.properties.update({"_sdc_lsn": Schema(type=["string", "null"])})
                     new_stream.metadata.update({("properties", "_sdc_lsn"): Metadata(Metadata.InclusionType.AVAILABLE, True, None)})
             if stream_modified:
                 modified_streams.append(new_stream.tap_stream_id)
