@@ -347,6 +347,14 @@ class MySQLConnector(SQLConnector):
 
     def create_engine(self) -> Engine:
         try:
+            connect_args = {
+                "max_allowed_packet": 268_435_456,  # 256MB
+                "connect_timeout": 3600,
+                "read_timeout": 3600,
+            }
+            if session_variables := self.config.get("session_variables"):
+                init_sql = ", ".join(f"@@session.{k}={v}" for k, v in session_variables.items())
+                connect_args["init_command"] = f"SET {init_sql}"
             return sa.create_engine(
                 self.sqlalchemy_url,
                 echo=False,
@@ -357,11 +365,7 @@ class MySQLConnector(SQLConnector):
                 max_overflow=self.pool_size * 2,
                 pool_recycle=300,
                 pool_pre_ping=True,
-                connect_args={
-                    "max_allowed_packet": 134217728,  # 128MB
-                    "connect_timeout": 600,
-                    "read_timeout": 3600,
-                },
+                connect_args=connect_args,
             )
         except TypeError:
             internal_logger.exception(
