@@ -70,6 +70,10 @@ class MySQLSingleLogBasedStream(SQLStream):
     def tap_stream_id(self) -> str:
         return "single_log_based"
 
+    @property
+    def selected(self) -> bool:
+        return True
+
     def write_all_schema_messages(self) -> None:
         for stream in self.log_based_streams:
             if stream.selected:
@@ -259,12 +263,12 @@ class MySQLSingleLogBasedStream(SQLStream):
         internal_logger.info("Using randomly generated server_id=%s", server_id)
 
         url_obj = make_url(self.connector.sqlalchemy_url)
-        schemas = []
-        tables = []
+        schemas = set()
+        tables = set()
         for stream in self.log_based_streams:
             schema, table_name = stream.fully_qualified_name.split(".")
-            schemas.append(schema)
-            tables.append(table_name)
+            schemas.add(schema)
+            tables.add(table_name)
 
         kwargs = {
             "connection_settings": {
@@ -278,8 +282,8 @@ class MySQLSingleLogBasedStream(SQLStream):
             "server_id": server_id,  # slave server ID
             "report_slave": "nekt",
             "only_events": [WriteRowsEvent, UpdateRowsEvent, DeleteRowsEvent],
-            "only_tables": tables,
-            "only_schemas": schemas,
+            "only_tables": list(tables),
+            "only_schemas": list(schemas),
             "log_file": log_file,
             "log_pos": log_pos,
             "resume_stream": True if log_pos else False,
@@ -390,7 +394,10 @@ class MySQLSingleLogBasedStream(SQLStream):
         for binlog_event in reader:
             cur_log_file = reader.log_file
             cur_log_pos = reader.log_pos
-            stream = [stream for stream in self.log_based_streams if stream.name == f"{binlog_event.schema}-{binlog_event.table}"][0]
+            stream_list = [stream for stream in self.log_based_streams if stream.name == f"{binlog_event.schema}-{binlog_event.table}"]
+            if not stream_list:
+                continue
+            stream = stream_list[0]
             selected_columns = stream.get_selected_schema()["properties"].keys()
 
             match binlog_event.__class__:

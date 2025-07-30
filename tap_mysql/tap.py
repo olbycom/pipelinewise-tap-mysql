@@ -15,6 +15,7 @@ import paramiko
 from meltano_db.db_helper import MeltanoDBHelper
 from nekt_singer_sdk import SQLStream, SQLTap, Stream
 from nekt_singer_sdk import typing as th  # JSON schema typing helpers
+from nekt_singer_sdk.contrib.msgspec import MsgSpecWriter
 from nekt_singer_sdk.singerlib import Catalog, Metadata, Schema, StateMessage
 from sqlalchemy.engine import URL
 from sqlalchemy.engine.url import make_url
@@ -37,6 +38,7 @@ class TapMySQL(SQLTap):
     earliest_lsn_file_name: str | None = None
     latest_lsn_file_name: str | None = None
     db_helper: MeltanoDBHelper
+    message_writer_class = MsgSpecWriter
 
     def __init__(
         self,
@@ -306,6 +308,12 @@ class TapMySQL(SQLTap):
             default=0,
             description=("The number of rows to fetch at a time. If set to 0, the tap will fetch all rows at once (no chunking)."),
         ),
+        th.Property(
+            "convert_dates_to_string",
+            th.BooleanType,
+            default=False,
+            description=("If true, all date, datetime and time columns will be exported as strings rather than date/time types."),
+        ),
     ).to_dict()
 
     def get_sqlalchemy_url(self, config: Mapping[str, Any]) -> str:
@@ -483,6 +491,13 @@ class TapMySQL(SQLTap):
         for stream in super().catalog.streams:
             stream_modified = False
             new_stream = copy.deepcopy(stream)
+            # If dates are converted to strings, strip the JSON-Schema "format" attribute from every property.
+            if getattr(self.connector, "convert_dates_to_string", False) and new_stream.schema and new_stream.schema.properties:
+                for prop in new_stream.schema.properties.values():
+                    if hasattr(prop, "format") and prop.format is not None:
+                        prop.format = None
+                        stream_modified = True
+            # If LOG_BASED, apply existing nullability and _sdc column logic
             if new_stream.replication_method == "LOG_BASED" and new_stream.schema.properties:
                 for property in new_stream.schema.properties.values():
                     if "null" not in property.type:
@@ -495,7 +510,10 @@ class TapMySQL(SQLTap):
                     new_stream.schema.required = None
                 if "_sdc_deleted_at" not in new_stream.schema.properties:
                     stream_modified = True
-                    new_stream.schema.properties.update({"_sdc_deleted_at": Schema(type=["string", "null"], format="date-time")})
+                    if getattr(self.connector, "convert_dates_to_string", False):
+                        new_stream.schema.properties.update({"_sdc_deleted_at": Schema(type=["string", "null"])})
+                    else:
+                        new_stream.schema.properties.update({"_sdc_deleted_at": Schema(type=["string", "null"], format="date-time")})
                     new_stream.metadata.update({("properties", "_sdc_deleted_at"): Metadata(Metadata.InclusionType.AVAILABLE, True, None)})
                 if "_sdc_lsn" not in new_stream.schema.properties:
                     stream_modified = True

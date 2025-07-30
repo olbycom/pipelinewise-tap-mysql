@@ -27,13 +27,16 @@ def patched_conform(
 ) -> Any:  # noqa: ANN401
     """Override type conformance to prevent dates turning into datetimes.
 
-    Converts a primitive to a json compatible type.
-
-    Returns:
-        The appropriate json compatible type.
+    Ensures that ``date``, ``datetime`` and ``time`` objects are always
+    serialised to their ISO formatted string representation so they can be
+    safely consumed downstream, regardless of schema settings.
     """
-    if isinstance(elem, datetime.date):
+
+    if isinstance(elem, (datetime.date, datetime.datetime, datetime.time)):
+        # ``isoformat()`` gives the canonical representation for all three
+        # objects (YYYY-MM-DD, YYYY-MM-DDTHH:MM:SS[.ffffff] and HH:MM:SS[.ffffff])
         return elem.isoformat()
+
     return unpatched_conform(elem=elem, property_schema=property_schema)
 
 
@@ -49,16 +52,19 @@ class MySQLConnector(SQLConnector):
         config: dict | None = None,
         sqlalchemy_url: str | None = None,
     ) -> None:
+        config = config or {}
         self.pool_size = config.get("streams_in_parallel", 20) * 2
         self.is_vitess = config.get("is_vitess")
+        # Whether to downgrade all DATE/TIME related columns to plain strings
+        self.convert_dates_to_string: bool = config.get("convert_dates_to_string", False)
         super().__init__(
             is_running_discovery=is_running_discovery,
             config=config,
             sqlalchemy_url=sqlalchemy_url,
         )
 
-    @staticmethod
     def to_jsonschema_type(
+        self,
         sql_type: str | sqlalchemy.types.TypeEngine | type[sqlalchemy.types.TypeEngine] | Any,  # noqa: ANN401
     ) -> dict:
         """Return a JSON Schema representation of the provided type.
@@ -89,15 +95,18 @@ class MySQLConnector(SQLConnector):
         if type_name is not None and type_name in ("JSONB", "JSON"):
             return th.ObjectType().type_dict
 
-        # if (
-        #     type_name is not None
-        #     and isinstance(sql_type, sqlalchemy.dialects.mysql)
-        #     and type_name == "ARRAY"
-        # ):
-        return MySQLConnector.sdk_typing_object(sql_type).type_dict
+        # Use the SDK typing helper to build the base schema.
+        result_dict = self.sdk_typing_object(sql_type).type_dict
+        # If the user requested to convert date/datetime values to plain strings,
+        # ensure any date-related JSON Schema 'format' markers are removed so
+        # that downstream consumers are not tempted to apply additional
+        # validation or casting.
+        if self.convert_dates_to_string:
+            result_dict.pop("format", None)
+        return result_dict
 
-    @staticmethod
     def sdk_typing_object(
+        self,
         from_type: str | sqlalchemy.types.TypeEngine | type[sqlalchemy.types.TypeEngine],
     ) -> th.DateTimeType | th.NumberType | th.IntegerType | th.DateType | th.StringType | th.BooleanType:
         """Return the JSON Schema dict that describes the sql type.
@@ -123,6 +132,7 @@ class MySQLConnector(SQLConnector):
             "timestamp": th.DateTimeType(),
             "datetime": th.DateTimeType(),
             "date": th.DateType(),
+            "time": th.StringType(),
             "int": th.IntegerType(),
             "numeric": th.NumberType(),
             "decimal": th.NumberType(),
@@ -153,6 +163,15 @@ class MySQLConnector(SQLConnector):
         # Look for the type name within the known SQL type names:
         for sqltype, jsonschema_type in sqltype_lookup.items():
             if sqltype.lower() in type_name.lower():
+                # If the user requests date conversion, downgrade the schema to
+                # a plain string so that consumers do not rely on the date
+                # format markers.
+                if self.convert_dates_to_string and isinstance(
+                    jsonschema_type,
+                    (th.DateTimeType, th.DateType),
+                ):
+                    return th.StringType()
+
                 return jsonschema_type
 
         return sqltype_lookup["string"]  # safe failover to str
@@ -339,7 +358,12 @@ class MySQLConnector(SQLConnector):
                 "read_timeout": 3600,
             }
             if session_variables := self.config.get("session_variables"):
-                init_sql = ", ".join(f"@@session.{k}={v}" for k, v in session_variables.items())
+                final_session_variables = {
+                    "net_write_timeout": 3600,
+                    "net_read_timeout": 3600,
+                }
+                final_session_variables.update(session_variables)
+                init_sql = ", ".join(f"@@session.{k}={v}" for k, v in final_session_variables.items())
                 connect_args["init_command"] = f"SET {init_sql}"
             return sa.create_engine(
                 self.sqlalchemy_url,
