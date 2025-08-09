@@ -12,7 +12,6 @@ from functools import cached_property
 from typing import TYPE_CHECKING, Any, cast
 
 import paramiko
-from meltano_db.db_helper import MeltanoDBHelper
 from nekt_singer_sdk import SQLStream, SQLTap, Stream
 from nekt_singer_sdk import typing as th  # JSON schema typing helpers
 from nekt_singer_sdk.contrib.msgspec import MsgSpecWriter
@@ -37,7 +36,6 @@ class TapMySQL(SQLTap):
     default_stream_class = MySQLStream
     earliest_lsn_file_name: str | None = None
     latest_lsn_file_name: str | None = None
-    db_helper: MeltanoDBHelper
     message_writer_class = MsgSpecWriter
 
     def __init__(
@@ -51,8 +49,6 @@ class TapMySQL(SQLTap):
         See https://github.com/meltano/sdk/pull/1525
         """
         super().__init__(*args, **kwargs)
-        self.db_helper = MeltanoDBHelper(db_uri=os.getenv("MELTANO_DATABASE_URI"))
-
         sql_alchemy_url_exists = self.config.get("sqlalchemy_url") is not None
         individual_url_params_exist = all(
             [
