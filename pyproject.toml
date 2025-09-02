@@ -40,7 +40,7 @@ paramiko = "^3.5.0"
 pymysql = "^1.1.1"
 mysql-replication = "^1.0.9"
 python-dateutil = "^2.9.0.post0"
-nekt-singer-sdk = {git = "https://github.com/nektcom/singer-sdk.git", rev = "v0.2.9"}
+nekt-singer-sdk = {git = "https://github.com/nektcom/singer-sdk.git", rev = "v0.3.0"}
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8"
 hypothesis = "^6.122.4"
