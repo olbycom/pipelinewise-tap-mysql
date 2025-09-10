@@ -52,9 +52,17 @@ class MySQLStream(SQLStream):
             if self.connector.is_vitess:  # type: ignore[attr-defined]
                 conn.exec_driver_sql("set workload=olap")  # See https://github.com/planetscale/discussion/discussions/190
 
-            result = conn.execution_options(stream_results=True).execute(query)
-            if self.config.get("chunk_size", 0) > 0:
-                result = result.yield_per(self.config["chunk_size"])
+            # Check if streaming should be disabled for this specific table
+            disable_streaming_config = self.config.get("disable_stream_results_for", {})
+            disable_streaming = disable_streaming_config.get(self.fully_qualified_name, False)
+            
+            if disable_streaming:
+                user_logger.info(f"Streaming disabled for {self.fully_qualified_name}, fetching all results into memory")
+                result = conn.execute(query)
+            else:
+                result = conn.execution_options(stream_results=True).execute(query)
+                if self.config.get("chunk_size", 0) > 0:
+                    result = result.yield_per(self.config["chunk_size"])
 
             for record in result.mappings():
                 # TODO: Standardize record mapping type

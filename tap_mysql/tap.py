@@ -310,6 +310,12 @@ class TapMySQL(SQLTap):
             default=False,
             description=("If true, all date, datetime and time columns will be exported as strings rather than date/time types."),
         ),
+        th.Property(
+            "disable_stream_results_for",
+            th.ObjectType(),
+            default={},
+            description=("Dictionary of stream names to disable streaming for. Key is stream name, value is boolean. If true, streaming is disabled for that table."),
+        ),
     ).to_dict()
 
     def get_sqlalchemy_url(self, config: Mapping[str, Any]) -> str:
