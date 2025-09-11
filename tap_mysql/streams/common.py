@@ -47,28 +47,54 @@ class MySQLStream(SQLStream):
             if start_val:
                 query = query.where(replication_key_col >= start_val)
 
-        with self.connector._connect() as conn:  # noqa: SLF001
-            user_logger.info(f"Getting records for query: '{query}'")
-            if self.connector.is_vitess:  # type: ignore[attr-defined]
-                conn.exec_driver_sql("set workload=olap")  # See https://github.com/planetscale/discussion/discussions/190
-
-            # Check if streaming should be disabled for this specific table
-            disable_streaming_config = self.config.get("disable_stream_results_for", {})
-            disable_streaming = disable_streaming_config.get(self.fully_qualified_name, False)
+        # Check if pagination should be used for this specific table
+        use_pagination_config = self.config.get("use_pagination_for", {})
+        use_pagination = use_pagination_config.get(self.fully_qualified_name, False)
+        
+        if use_pagination and not self.replication_key:
+            # Use LIMIT/OFFSET pagination to avoid streaming cursor issues
+            page_size = self.config.get("pagination_page_size", 50000)
+            offset = 0
             
-            if disable_streaming:
-                user_logger.info(f"Streaming disabled for {self.fully_qualified_name}, fetching all results into memory")
-                result = conn.execute(query)
-            else:
+            while True:
+                paginated_query = query.limit(page_size).offset(offset)
+                user_logger.info(f"Getting paginated records: LIMIT {page_size} OFFSET {offset} for {self.fully_qualified_name}")
+                
+                with self.connector._connect() as conn:  # noqa: SLF001
+                    if self.connector.is_vitess:  # type: ignore[attr-defined]
+                        conn.exec_driver_sql("set workload=olap")
+                    
+                    result = conn.execute(paginated_query)
+                    records_in_page = 0
+                    
+                    for record in result.mappings():
+                        records_in_page += 1
+                        transformed_record = self.post_process(dict(record))
+                        if transformed_record is None:
+                            continue
+                        yield transformed_record
+                
+                if records_in_page < page_size:
+                    user_logger.info(f"Pagination complete for {self.fully_qualified_name} at offset {offset + records_in_page}")
+                    break
+                
+                offset += page_size
+        else:
+            # Use standard streaming approach
+            with self.connector._connect() as conn:  # noqa: SLF001
+                user_logger.info(f"Getting records for query: '{query}'")
+                if self.connector.is_vitess:  # type: ignore[attr-defined]
+                    conn.exec_driver_sql("set workload=olap")  # See https://github.com/planetscale/discussion/discussions/190
+
                 result = conn.execution_options(stream_results=True).execute(query)
                 if self.config.get("chunk_size", 0) > 0:
                     result = result.yield_per(self.config["chunk_size"])
 
-            for record in result.mappings():
-                # TODO: Standardize record mapping type
-                # https://github.com/meltano/sdk/issues/2096
-                transformed_record = self.post_process(dict(record))
-                if transformed_record is None:
-                    # Record filtered out during post_process()
-                    continue
-                yield transformed_record
+                for record in result.mappings():
+                    # TODO: Standardize record mapping type
+                    # https://github.com/meltano/sdk/issues/2096
+                    transformed_record = self.post_process(dict(record))
+                    if transformed_record is None:
+                        # Record filtered out during post_process()
+                        continue
+                    yield transformed_record

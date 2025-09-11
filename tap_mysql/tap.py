@@ -311,10 +311,16 @@ class TapMySQL(SQLTap):
             description=("If true, all date, datetime and time columns will be exported as strings rather than date/time types."),
         ),
         th.Property(
-            "disable_stream_results_for",
+            "use_pagination_for",
             th.ObjectType(),
             default={},
-            description=("Dictionary of stream names to disable streaming for. Key is stream name, value is boolean. If true, streaming is disabled for that table."),
+            description=("Dictionary of stream names to use pagination for instead of streaming. Key is stream name, value is boolean. If true, pagination is used for that table."),
+        ),
+        th.Property(
+            "pagination_page_size",
+            th.IntegerType,
+            default=50000,
+            description=("Page size for pagination queries. Default is 50000 records per page."),
         ),
     ).to_dict()
 
