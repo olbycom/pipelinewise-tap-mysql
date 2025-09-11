@@ -49,11 +49,7 @@ class MySQLStream(SQLStream):
 
         # Check if pagination should be used for this specific table
         use_pagination_config = self.config.get("use_pagination_for", {})
-        use_pagination = use_pagination_config.get(self.fully_qualified_name, False)
-
-        user_logger.info(
-            f"Pagination debug - fully_qualified_name: '{self.fully_qualified_name}', use_pagination: {use_pagination}, replication_key: '{self.replication_key}'"
-        )
+        use_pagination = use_pagination_config.get(self.name, False)
 
         if use_pagination and not self.replication_key:
             # Use LIMIT/OFFSET pagination to avoid streaming cursor issues
@@ -62,7 +58,7 @@ class MySQLStream(SQLStream):
 
             while True:
                 paginated_query = query.limit(page_size).offset(offset)
-                user_logger.info(f"Getting paginated records: LIMIT {page_size} OFFSET {offset} for {self.fully_qualified_name}")
+                user_logger.info(f"Getting paginated records: LIMIT {page_size} OFFSET {offset} for {self.name}")
 
                 with self.connector._connect() as conn:  # noqa: SLF001
                     if self.connector.is_vitess:  # type: ignore[attr-defined]
@@ -79,7 +75,7 @@ class MySQLStream(SQLStream):
                         yield transformed_record
 
                 if records_in_page < page_size:
-                    user_logger.info(f"Pagination complete for {self.fully_qualified_name} at offset {offset + records_in_page}")
+                    user_logger.info(f"Pagination complete for {self.name} at offset {offset + records_in_page}")
                     break
 
                 offset += page_size
