@@ -50,34 +50,38 @@ class MySQLStream(SQLStream):
         # Check if pagination should be used for this specific table
         use_pagination_config = self.config.get("use_pagination_for", {})
         use_pagination = use_pagination_config.get(self.fully_qualified_name, False)
-        
+
+        user_logger.info(
+            f"Pagination debug - fully_qualified_name: '{self.fully_qualified_name}', use_pagination: {use_pagination}, replication_key: '{self.replication_key}'"
+        )
+
         if use_pagination and not self.replication_key:
             # Use LIMIT/OFFSET pagination to avoid streaming cursor issues
             page_size = self.config.get("pagination_page_size", 50000)
             offset = 0
-            
+
             while True:
                 paginated_query = query.limit(page_size).offset(offset)
                 user_logger.info(f"Getting paginated records: LIMIT {page_size} OFFSET {offset} for {self.fully_qualified_name}")
-                
+
                 with self.connector._connect() as conn:  # noqa: SLF001
                     if self.connector.is_vitess:  # type: ignore[attr-defined]
                         conn.exec_driver_sql("set workload=olap")
-                    
+
                     result = conn.execute(paginated_query)
                     records_in_page = 0
-                    
+
                     for record in result.mappings():
                         records_in_page += 1
                         transformed_record = self.post_process(dict(record))
                         if transformed_record is None:
                             continue
                         yield transformed_record
-                
+
                 if records_in_page < page_size:
                     user_logger.info(f"Pagination complete for {self.fully_qualified_name} at offset {offset + records_in_page}")
                     break
-                
+
                 offset += page_size
         else:
             # Use standard streaming approach
