@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(poetry run ruff:*)",
+      "Bash(poetry install:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

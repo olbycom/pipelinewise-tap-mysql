@@ -157,7 +157,7 @@ class MySQLSingleLogBasedStream(SQLStream):
             internal_logger.warning("Unable to get binary logs from the server.")
             raise
 
-        identifier = self.create_unique_identifier(latest_log_file, latest_log_pos, 0)
+        identifier = self.create_unique_identifier(latest_log_file, latest_log_pos)
         fake_record = {self.replication_key: identifier}
 
         treat_as_sorted = self.is_sorted
@@ -238,8 +238,8 @@ class MySQLSingleLogBasedStream(SQLStream):
         """Parse the lsn to get the file name and position."""
         # Decompose the LSN by reversing the bit-shifting
         lsn = int(lsn)
-        file_number = lsn >> 48
-        position = (lsn >> 16) & 0xFFFFFFFF  # Extract 32 bits for position
+        file_number = lsn >> 32
+        position = lsn & 0xFFFFFFFF  # Extract bottom 32 bits for position
 
         with self.connector._connect() as conn:
             binary_logs = conn.execute(text("SHOW BINARY LOGS"))
@@ -291,13 +291,12 @@ class MySQLSingleLogBasedStream(SQLStream):
 
         return BinLogStreamReader(**kwargs)
 
-    def create_unique_identifier(self, file_name: str, position: int, row_index: int = 0) -> int:
+    def create_unique_identifier(self, file_name: str, position: int) -> int:
         """Create a unique 64-bit integer to represent the LSN.
 
         This is composed of:
-        - binlog file number (top 16 bits)
-        - binlog position (middle 32 bits)
-        - row index within the event (bottom 16 bits)
+        - binlog file number (top 32 bits)
+        - binlog position (bottom 32 bits)
         """
         match = re.search(r"\d+$", file_name)
         if not match:
@@ -306,22 +305,16 @@ class MySQLSingleLogBasedStream(SQLStream):
 
         file_number = int(match.group())
 
-        if file_number >= (1 << 16):
-            self.logger.warning("Binlog file number %s exceeds the 16-bit allocation.", file_number)
+        if file_number >= (1 << 32):
+            self.logger.warning("Binlog file number %s exceeds the 32-bit allocation.", file_number)
         if position >= (1 << 32):
             self.logger.warning("Binlog position %s exceeds the 32-bit allocation.", position)
-        if row_index >= (1 << 16):
-            self.logger.warning(
-                "Row index %s exceeds the 16-bit allocation. LSN may not be unique for this event.",
-                row_index,
-            )
 
         # Compose the LSN by bit-shifting the components
-        file_part = file_number << 48
-        pos_part = position << 16
-        row_part = row_index
+        file_part = file_number << 32
+        pos_part = position
 
-        return file_part + pos_part + row_part
+        return file_part + pos_part
 
     def handle_write_row(
         self,
@@ -330,7 +323,6 @@ class MySQLSingleLogBasedStream(SQLStream):
         selected_columns,
         cur_log_file: str,
         cur_log_pos: int,
-        row_index: int,
     ) -> dict[str, Any]:
         values = row.get("values")
         filtered_row = {col: values[col] for col in selected_columns if col in values}
@@ -338,7 +330,7 @@ class MySQLSingleLogBasedStream(SQLStream):
         if not filtered_row:
             return
 
-        filtered_row["_sdc_lsn"] = self.create_unique_identifier(cur_log_file, cur_log_pos, row_index)
+        filtered_row["_sdc_lsn"] = self.create_unique_identifier(cur_log_file, cur_log_pos)
         filtered_row["_sdc_deleted_at"] = None
 
         return filtered_row
@@ -350,7 +342,6 @@ class MySQLSingleLogBasedStream(SQLStream):
         selected_columns,
         cur_log_file: str,
         cur_log_pos: int,
-        row_index: int,
     ) -> dict[str, Any]:
         values = row.get("after_values")
         filtered_row = {col: values[col] for col in selected_columns if col in values}
@@ -358,7 +349,7 @@ class MySQLSingleLogBasedStream(SQLStream):
         if not filtered_row:
             return
 
-        filtered_row["_sdc_lsn"] = self.create_unique_identifier(cur_log_file, cur_log_pos, row_index)
+        filtered_row["_sdc_lsn"] = self.create_unique_identifier(cur_log_file, cur_log_pos)
         filtered_row["_sdc_deleted_at"] = None
 
         return filtered_row
@@ -370,7 +361,6 @@ class MySQLSingleLogBasedStream(SQLStream):
         selected_columns,
         cur_log_file: str,
         cur_log_pos: int,
-        row_index: int,
     ) -> dict[str, Any]:
         values = row.get("values")
         filtered_row = {col: values[col] for col in selected_columns if col in values}
@@ -378,7 +368,7 @@ class MySQLSingleLogBasedStream(SQLStream):
         if not filtered_row:
             return
 
-        filtered_row["_sdc_lsn"] = self.create_unique_identifier(cur_log_file, cur_log_pos, row_index)
+        filtered_row["_sdc_lsn"] = self.create_unique_identifier(cur_log_file, cur_log_pos)
         filtered_row["_sdc_deleted_at"] = parser.parse(event.formatted_timestamp)
         return filtered_row
 
@@ -402,40 +392,37 @@ class MySQLSingleLogBasedStream(SQLStream):
 
             match binlog_event.__class__:
                 case _ if isinstance(binlog_event, WriteRowsEvent):
-                    for i, row in enumerate(binlog_event.rows):
+                    for row in binlog_event.rows:
                         row = self.handle_write_row(
                             binlog_event,
                             row,
                             selected_columns,
                             cur_log_file,
                             cur_log_pos,
-                            i,
                         )
                         if row:
                             transformed_record = self.post_process(row)
                             yield transformed_record, stream.name
                 case _ if isinstance(binlog_event, UpdateRowsEvent):
-                    for i, row in enumerate(binlog_event.rows):
+                    for row in binlog_event.rows:
                         row = self.handle_update_row(
                             binlog_event,
                             row,
                             selected_columns,
                             cur_log_file,
                             cur_log_pos,
-                            i,
                         )
                         if row:
                             transformed_record = self.post_process(row)
                             yield transformed_record, stream.name
                 case _ if isinstance(binlog_event, DeleteRowsEvent):
-                    for i, row in enumerate(binlog_event.rows):
+                    for row in binlog_event.rows:
                         row = self.handle_delete_row(
                             binlog_event,
                             row,
                             selected_columns,
                             cur_log_file,
                             cur_log_pos,
-                            i,
                         )
                         if row:
                             transformed_record = self.post_process(row)
