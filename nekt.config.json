@@ -1,0 +1,118 @@
+{
+  "meltano": {
+    "name": "tap-mysql",
+    "variant": "nekt",
+    "namespace": "tap_mysql",
+    "pip_url": "-e ./extract/tap-mysql",
+    "executable": "tap-mysql",
+    "capabilities": [
+      "state",
+      "catalog",
+      "discover"
+    ]
+  },
+  "connectors": [
+    {
+      "connector_slug": "mysql",
+      "config_template": {
+        "type": "object",
+        "required": [
+          "host",
+          "password",
+          "port",
+          "user",
+          "database"
+        ],
+        "properties": {
+          "host": {
+            "type": "string",
+            "order": 1,
+            "title": "Host",
+            "el_type": "extractor",
+            "pattern": "^(?!https?://).*$",
+            "description": "The host address of your MySQL database."
+          },
+          "port": {
+            "type": "integer",
+            "order": 2,
+            "title": "Port",
+            "default": 3306,
+            "el_type": "extractor",
+            "description": "The port used for connecting to your MySQL database. The default port for MySQL is 3306, but your port might be different."
+          },
+          "user": {
+            "type": "string",
+            "order": 4,
+            "title": "User",
+            "el_type": "extractor",
+            "description": "The user name for accessing your MySQL database."
+          },
+          "database": {
+            "type": "string",
+            "order": 3,
+            "title": "Database",
+            "el_type": "extractor",
+            "description": "The name of a database in your MySQL account."
+          },
+          "max_size": {
+            "type": "integer",
+            "title": "Max batch size for parquet files",
+            "hidden": true,
+            "default": 10000,
+            "el_type": "loader",
+            "description": "Batch size for target s3 parquet",
+            "advanced_settings": true
+          },
+          "password": {
+            "type": "string",
+            "order": 5,
+            "title": "Password",
+            "format": "password",
+            "secret": true,
+            "el_type": "extractor",
+            "description": "The password used for accessing your MySQL database."
+          },
+          "chunk_size": {
+            "type": "integer",
+            "title": "Chunk size",
+            "default": 0,
+            "el_type": "extractor",
+            "description": "The number of rows to fetch at a time. If set to 0, the tap will fetch all rows at once (no chunking).",
+            "advanced_settings": true
+          },
+          "filter_schemas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Include schemas",
+            "hidden": true,
+            "el_type": "extractor",
+            "description": "Filter the schemas you want to sync from your database. Using this filter helps speed up the discovery process, since schemas that aren't included in the filter will be ignored.",
+            "advanced_config": true
+          },
+          "session_variables": {
+            "type": "object",
+            "title": "Session variables",
+            "hidden": true,
+            "el_type": "extractor",
+            "properties": {},
+            "description": "Session variables",
+            "advanced_config": true
+          },
+          "use_pagination_for": {
+            "type": "object",
+            "title": "Use limit/offset for table",
+            "hidden": true,
+            "el_type": "extractor",
+            "properties": {},
+            "description": "Limit/Offset",
+            "advanced_config": true
+          }
+        },
+        "nekt_docs_url": "https://docs.nekt.ai/sources/mysql",
+        "connector_description": "Connect MySQL with Nekt to seamlessly manage and analyze your relational database data. Utilize Nekt’s powerful data hub to perform complex queries, create custom visualizations, and streamline your operations."
+      }
+    }
+  ]
+}

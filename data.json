@@ -1,8 +1,0 @@
-{
-  "name": "tap-mysql",
-  "variant": "nekt",
-  "namespace": "tap_mysql",
-  "pip_url": "-e ./extract/tap-mysql",
-  "executable": "tap-mysql",
-  "capabilities": ["state", "catalog", "discover"]
-}
