@@ -202,7 +202,9 @@ class MySQLSingleLogBasedStream(SQLStream):
 
                 for _, record_result in enumerate(self.get_records(current_context)):
                     record, stream_name = record_result
-                    yield from self.handle_record(record, stream_name, current_context, record_index, write_messages, record_counter)
+                    yield from self.handle_record(
+                        record, stream_name, current_context, record_index, write_messages, record_counter
+                    )
                     record_index += 1
 
                 if current_context == state_partition_context:
@@ -290,6 +292,64 @@ class MySQLSingleLogBasedStream(SQLStream):
         }
 
         return BinLogStreamReader(**kwargs)
+
+    def log_binlog_progress(self, current_log_file: str) -> None:
+        """Log progress information about binlog processing.
+
+        Args:
+            current_log_file: The binlog file currently being processed
+        """
+        try:
+            with self.connector._connect() as conn:
+                binary_logs = conn.execute(text("SHOW BINARY LOGS")).fetchall()
+                if not binary_logs:
+                    user_logger.info(f"Now processing binlog file: {current_log_file}")
+                    return
+
+                # Convert to list of tuples: (filename, size)
+                log_files = [(log[0], log[1]) for log in binary_logs]
+                total_files = len(log_files)
+                latest_file = log_files[-1][0]
+
+                # Find current file position
+                current_idx = None
+                for idx, (filename, _) in enumerate(log_files):
+                    if filename == current_log_file:
+                        current_idx = idx
+                        break
+
+                if current_idx is None:
+                    # Current file not found, might be already rotated off
+                    user_logger.info(
+                        f"Now processing binlog file: {current_log_file}, database is currently at {latest_file}"
+                    )
+                    return
+
+                remaining_files = total_files - current_idx - 1
+                remaining_bytes = sum(size for _, size in log_files[current_idx + 1 :])
+                progress_pct = ((current_idx + 1) / total_files * 100) if total_files > 0 else 0
+
+                # Format bytes in human-readable form
+                def format_bytes(bytes_val):
+                    if bytes_val >= 1_073_741_824:  # GB
+                        return f"{bytes_val / 1_073_741_824:.2f}GB"
+                    elif bytes_val >= 1_048_576:  # MB
+                        return f"{bytes_val / 1_048_576:.2f}MB"
+                    elif bytes_val >= 1024:  # KB
+                        return f"{bytes_val / 1024:.2f}KB"
+                    else:
+                        return f"{bytes_val}B"
+
+                remaining_str = format_bytes(remaining_bytes)
+                user_logger.info(
+                    f"Now processing binlog file: {current_log_file} "
+                    f"({current_idx + 1}/{total_files}, {progress_pct:.1f}% complete). "
+                    f"Database is currently at {latest_file}. "
+                    f"Remaining: {remaining_files} files, {remaining_str}"
+                )
+        except Exception:
+            internal_logger.warning("Unable to get binlog progress information.", exc_info=True)
+            user_logger.info(f"Now processing binlog file: {current_log_file}")
 
     def create_unique_identifier(self, file_name: str, position: int) -> int:
         """Create a unique 64-bit integer to represent the LSN.
@@ -379,12 +439,25 @@ class MySQLSingleLogBasedStream(SQLStream):
         else:
             log_file, log_pos = self.get_min_server_log_file_and_pos()
 
+        # Log startup position
+        user_logger.info(f"Starting binlog replication from {log_file} at position {log_pos}.")
+
         reader = self.create_binlog_stream_reader(log_file=log_file, log_pos=log_pos)
 
+        last_logged_file = None
         for binlog_event in reader:
             cur_log_file = reader.log_file
             cur_log_pos = reader.log_pos
-            stream_list = [stream for stream in self.log_based_streams if stream.name == f"{binlog_event.schema}-{binlog_event.table}"]
+
+            if cur_log_file != last_logged_file:
+                self.log_binlog_progress(cur_log_file)
+                last_logged_file = cur_log_file
+
+            stream_list = [
+                stream
+                for stream in self.log_based_streams
+                if stream.name == f"{binlog_event.schema}-{binlog_event.table}"
+            ]
             if not stream_list:
                 continue
             stream = stream_list[0]
