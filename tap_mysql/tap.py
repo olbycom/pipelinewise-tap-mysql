@@ -73,7 +73,9 @@ class TapMySQL(SQLTap):
             "port",
             th.IntegerType,
             default=3306,
-            description=("The port on which mysql is awaiting connection. Note if sqlalchemy_url is set this will be ignored."),
+            description=(
+                "The port on which mysql is awaiting connection. Note if sqlalchemy_url is set this will be ignored."
+            ),
         ),
         th.Property(
             "user",
@@ -165,7 +167,9 @@ class TapMySQL(SQLTap):
                     th.BooleanType,
                     required=False,
                     default=False,
-                    description=("Enable an ssh tunnel (also known as bastion server), see the other ssh_tunnel.* properties for more details"),
+                    description=(
+                        "Enable an ssh tunnel (also known as bastion server), see the other ssh_tunnel.* properties for more details"
+                    ),
                 ),
                 th.Property(
                     "host",
@@ -302,19 +306,25 @@ class TapMySQL(SQLTap):
             "chunk_size",
             th.IntegerType,
             default=0,
-            description=("The number of rows to fetch at a time. If set to 0, the tap will fetch all rows at once (no chunking)."),
+            description=(
+                "The number of rows to fetch at a time. If set to 0, the tap will fetch all rows at once (no chunking)."
+            ),
         ),
         th.Property(
             "convert_dates_to_string",
             th.BooleanType,
             default=False,
-            description=("If true, all date, datetime and time columns will be exported as strings rather than date/time types."),
+            description=(
+                "If true, all date, datetime and time columns will be exported as strings rather than date/time types."
+            ),
         ),
         th.Property(
             "use_pagination_for",
             th.ObjectType(),
             default={},
-            description=("Dictionary of stream names to use pagination for instead of streaming. Key is stream name, value is boolean. If true, pagination is used for that table."),
+            description=(
+                "Dictionary of stream names to use pagination for instead of streaming. Key is stream name, value is boolean. If true, pagination is used for that table."
+            ),
         ),
         th.Property(
             "pagination_page_size",
@@ -500,7 +510,11 @@ class TapMySQL(SQLTap):
             stream_modified = False
             new_stream = copy.deepcopy(stream)
             # If dates are converted to strings, strip the JSON-Schema "format" attribute from every property.
-            if getattr(self.connector, "convert_dates_to_string", False) and new_stream.schema and new_stream.schema.properties:
+            if (
+                getattr(self.connector, "convert_dates_to_string", False)
+                and new_stream.schema
+                and new_stream.schema.properties
+            ):
                 for prop in new_stream.schema.properties.values():
                     if hasattr(prop, "format") and prop.format is not None:
                         prop.format = None
@@ -521,12 +535,35 @@ class TapMySQL(SQLTap):
                     if getattr(self.connector, "convert_dates_to_string", False):
                         new_stream.schema.properties.update({"_sdc_deleted_at": Schema(type=["string", "null"])})
                     else:
-                        new_stream.schema.properties.update({"_sdc_deleted_at": Schema(type=["string", "null"], format="date-time")})
-                    new_stream.metadata.update({("properties", "_sdc_deleted_at"): Metadata(Metadata.InclusionType.AVAILABLE, True, None)})
+                        new_stream.schema.properties.update(
+                            {"_sdc_deleted_at": Schema(type=["string", "null"], format="date-time")}
+                        )
+                    new_stream.metadata.update(
+                        {("properties", "_sdc_deleted_at"): Metadata(Metadata.InclusionType.AVAILABLE, True, None)}
+                    )
                 if "_sdc_lsn" not in new_stream.schema.properties:
                     stream_modified = True
                     new_stream.schema.properties.update({"_sdc_lsn": Schema(type=["string", "null"])})
-                    new_stream.metadata.update({("properties", "_sdc_lsn"): Metadata(Metadata.InclusionType.AVAILABLE, True, None)})
+                    new_stream.metadata.update(
+                        {("properties", "_sdc_lsn"): Metadata(Metadata.InclusionType.AVAILABLE, True, None)}
+                    )
+                if "_sdc_operation" not in new_stream.schema.properties:
+                    stream_modified = True
+                    new_stream.schema.properties.update({"_sdc_operation": Schema(type=["string", "null"])})
+                    new_stream.metadata.update(
+                        {("properties", "_sdc_operation"): Metadata(Metadata.InclusionType.AVAILABLE, True, None)}
+                    )
+                if "_sdc_event_timestamp" not in new_stream.schema.properties:
+                    stream_modified = True
+                    if getattr(self.connector, "convert_dates_to_string", False):
+                        new_stream.schema.properties.update({"_sdc_event_timestamp": Schema(type=["string", "null"])})
+                    else:
+                        new_stream.schema.properties.update(
+                            {"_sdc_event_timestamp": Schema(type=["string", "null"], format="date-time")}
+                        )
+                    new_stream.metadata.update(
+                        {("properties", "_sdc_event_timestamp"): Metadata(Metadata.InclusionType.AVAILABLE, True, None)}
+                    )
             if stream_modified:
                 modified_streams.append(new_stream.tap_stream_id)
             new_catalog.add_stream(new_stream)
@@ -565,8 +602,12 @@ class TapMySQL(SQLTap):
         if self.state:
             self.write_message(StateMessage(value=self.state))
 
-        log_based_streams = [stream for stream in self.streams.values() if stream.replication_method == "LOG_BASED" and stream.selected]
-        other_streams = [stream for stream in self.streams.values() if stream.replication_method != "LOG_BASED" and stream.selected]
+        log_based_streams = [
+            stream for stream in self.streams.values() if stream.replication_method == "LOG_BASED" and stream.selected
+        ]
+        other_streams = [
+            stream for stream in self.streams.values() if stream.replication_method != "LOG_BASED" and stream.selected
+        ]
 
         if log_based_streams:
             log_based_stream = MySQLSingleLogBasedStream(

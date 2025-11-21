@@ -391,6 +391,8 @@ class MySQLSingleLogBasedStream(SQLStream):
             return
 
         filtered_row["_sdc_lsn"] = self.create_unique_identifier(cur_log_file, cur_log_pos)
+        filtered_row["_sdc_event_timestamp"] = parser.parse(event.formatted_timestamp)
+        filtered_row["_sdc_operation"] = "INSERT"
         filtered_row["_sdc_deleted_at"] = None
 
         return filtered_row
@@ -410,6 +412,8 @@ class MySQLSingleLogBasedStream(SQLStream):
             return
 
         filtered_row["_sdc_lsn"] = self.create_unique_identifier(cur_log_file, cur_log_pos)
+        filtered_row["_sdc_event_timestamp"] = parser.parse(event.formatted_timestamp)
+        filtered_row["_sdc_operation"] = "UPDATE"
         filtered_row["_sdc_deleted_at"] = None
 
         return filtered_row
@@ -429,6 +433,8 @@ class MySQLSingleLogBasedStream(SQLStream):
             return
 
         filtered_row["_sdc_lsn"] = self.create_unique_identifier(cur_log_file, cur_log_pos)
+        filtered_row["_sdc_event_timestamp"] = parser.parse(event.formatted_timestamp)
+        filtered_row["_sdc_operation"] = "DELETE"
         filtered_row["_sdc_deleted_at"] = parser.parse(event.formatted_timestamp)
         return filtered_row
 
