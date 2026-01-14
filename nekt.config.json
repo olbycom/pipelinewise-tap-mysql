@@ -5,24 +5,14 @@
     "namespace": "tap_mysql",
     "pip_url": "-e ./extract/tap-mysql",
     "executable": "tap-mysql",
-    "capabilities": [
-      "state",
-      "catalog",
-      "discover"
-    ]
+    "capabilities": ["state", "catalog", "discover"]
   },
   "connectors": [
     {
       "connector_slug": "mysql",
       "config_template": {
         "type": "object",
-        "required": [
-          "host",
-          "password",
-          "port",
-          "user",
-          "database"
-        ],
+        "required": ["host", "password", "port", "user", "database"],
         "properties": {
           "host": {
             "type": "string",
@@ -108,6 +98,181 @@
             "properties": {},
             "description": "Limit/Offset",
             "advanced_config": true
+          }
+        },
+        "nekt_docs_url": "https://docs.nekt.ai/sources/mysql",
+        "connector_description": "Connect MySQL with Nekt to seamlessly manage and analyze your relational database data. Utilize Nekt’s powerful data hub to perform complex queries, create custom visualizations, and streamline your operations."
+      }
+    },
+    {
+      "connector_slug": "mysql-snowflake-hapana",
+      "config_template": {
+        "type": "object",
+        "required": [
+          "host",
+          "password",
+          "port",
+          "user",
+          "database",
+          "destination_account",
+          "destination_user",
+          "destination_schema",
+          "destination_warehouse",
+          "destination_database"
+        ],
+        "properties": {
+          "host": {
+            "type": "string",
+            "order": 1,
+            "title": "MySQL Host",
+            "el_type": "extractor",
+            "description": "The host address of your MySQL database."
+          },
+          "port": {
+            "type": "integer",
+            "order": 2,
+            "title": "MySQL Port",
+            "default": 3306,
+            "el_type": "extractor",
+            "description": "The port used for connecting to your MySQL database. The default port for MySQL is 3306, but your port might be different."
+          },
+          "user": {
+            "type": "string",
+            "order": 4,
+            "title": "MySQL User",
+            "el_type": "extractor",
+            "description": "The user name for accessing your MySQL database."
+          },
+          "database": {
+            "type": "string",
+            "order": 3,
+            "title": "MySQL Database",
+            "el_type": "extractor",
+            "description": "The name of a database in your MySQL account."
+          },
+          "password": {
+            "type": "string",
+            "order": 5,
+            "title": "MySQL Password",
+            "format": "password",
+            "secret": true,
+            "el_type": "extractor",
+            "description": "The password used for accessing your MySQL database."
+          },
+          "chunk_size": {
+            "type": "integer",
+            "title": "MySQL Chunk size",
+            "default": 0,
+            "el_type": "extractor",
+            "description": "The number of rows to fetch at a time. If set to 0, the tap will fetch all rows at once (no chunking).",
+            "advanced_settings": true
+          },
+          "filter_schemas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Include schemas",
+            "hidden": true,
+            "el_type": "extractor",
+            "description": "Filter the schemas you want to sync from your database. Using this filter helps speed up the discovery process, since schemas that aren't included in the filter will be ignored.",
+            "advanced_settings": true
+          },
+          "destination_user": {
+            "type": "string",
+            "order": 10,
+            "title": "Snowflake User",
+            "el_type": "loader",
+            "config_key": "user",
+            "description": "The login name for your Snowflake user."
+          },
+          "session_variables": {
+            "type": "object",
+            "title": "Session Variables",
+            "hidden": true,
+            "el_type": "extractor",
+            "properties": {},
+            "description": "Hidden variable to set database properties",
+            "additional_properties": true
+          },
+          "destination_schema": {
+            "type": "string",
+            "order": 9,
+            "title": "Snowflake Schema",
+            "el_type": "loader",
+            "config_key": "schema",
+            "description": "The schema inside your database where you want the tables to be created."
+          },
+          "destination_account": {
+            "type": "string",
+            "order": 6,
+            "title": "Snowflake Account identifier",
+            "el_type": "loader",
+            "docs_url": "https://docs.snowflake.com/en/user-guide/admin-account-identifier#using-an-account-locator-as-an-identifier",
+            "config_key": "account",
+            "description": "Your Snowflake account identifier.",
+            "placeholder": "<account_locator>.<cloud_region_id>.<cloud>"
+          },
+          "destination_database": {
+            "type": "string",
+            "order": 8,
+            "title": "Snowflake Database name",
+            "el_type": "loader",
+            "config_key": "database",
+            "description": "The Snowflake database to which you want to send the data to."
+          },
+          "destination_password": {
+            "type": "string",
+            "order": 11,
+            "title": "Snowflake Password",
+            "format": "password",
+            "secret": true,
+            "el_type": "loader",
+            "config_key": "password",
+            "description": "The password for your Snowflake user."
+          },
+          "destination_warehouse": {
+            "type": "string",
+            "order": 7,
+            "title": "Snowflake Warehouse",
+            "el_type": "loader",
+            "config_key": "warehouse",
+            "description": "Your Snowflake warehouse"
+          },
+          "convert_dates_to_string": {
+            "type": "boolean",
+            "title": "MySQL Convert dates to string",
+            "default": false,
+            "el_type": "extractor",
+            "description": "Handle dates as string (Use when database doesn't have reliable date columns).",
+            "advanced_settings": true
+          },
+          "destination_private_key": {
+            "type": "string",
+            "order": 12,
+            "title": "Snowflake private key",
+            "format": "textarea",
+            "el_type": "loader",
+            "config_key": "private_key",
+            "description": "The private key for your Snowflake user."
+          },
+          "destination_float_precision": {
+            "type": "integer",
+            "order": 17,
+            "title": "Snowflake float precision",
+            "default": 6,
+            "el_type": "loader",
+            "config_key": "float_precision",
+            "description": "The float precision to use on snowflake."
+          },
+          "destination_network_timeout": {
+            "type": "integer",
+            "order": 18,
+            "title": "Snowflake network timeout",
+            "default": 900,
+            "el_type": "loader",
+            "config_key": "network_timeout",
+            "description": "The network timeout to use on snowflake."
           }
         },
         "nekt_docs_url": "https://docs.nekt.ai/sources/mysql",
