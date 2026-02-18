@@ -90,14 +90,13 @@
             "description": "Session variables",
             "advanced_config": true
           },
-          "use_pagination_for": {
-            "type": "object",
-            "title": "Use limit/offset for table",
-            "hidden": true,
+          "use_batch_query": {
+            "type": "boolean",
+            "title": "Use batch query",
+            "default": false,
             "el_type": "extractor",
-            "properties": {},
-            "description": "Limit/Offset",
-            "advanced_config": true
+            "description": "If true, uses keyset pagination with retry logic. Prevents connection timeouts on large tables by breaking queries into batches.",
+            "advanced_settings": true
           }
         },
         "nekt_docs_url": "https://docs.nekt.ai/sources/mysql",
@@ -194,6 +193,14 @@
             "properties": {},
             "description": "Hidden variable to set database properties",
             "additional_properties": true
+          },
+          "use_batch_query": {
+            "type": "boolean",
+            "title": "Use batch query",
+            "default": false,
+            "el_type": "extractor",
+            "description": "If true, uses keyset pagination with retry logic. Prevents connection timeouts on large tables by breaking queries into batches.",
+            "advanced_settings": true
           },
           "destination_schema": {
             "type": "string",

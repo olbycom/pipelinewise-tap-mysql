@@ -311,26 +311,34 @@ class TapMySQL(SQLTap):
             ),
         ),
         th.Property(
+            "use_batch_query",
+            th.BooleanType,
+            default=False,
+            description=(
+                "If true, uses keyset pagination with retry logic for extraction. "
+                "This prevents connection timeouts on large tables by breaking queries into batches. "
+                "Requires a primary key. Uses chunk_size for batch size."
+            ),
+        ),
+        th.Property(
+            "batch_retry_max",
+            th.IntegerType,
+            default=3,
+            description="Maximum number of retries per batch on connection failure.",
+        ),
+        th.Property(
+            "batch_retry_delay",
+            th.IntegerType,
+            default=5,
+            description="Initial delay in seconds between retries (uses exponential backoff).",
+        ),
+        th.Property(
             "convert_dates_to_string",
             th.BooleanType,
             default=False,
             description=(
                 "If true, all date, datetime and time columns will be exported as strings rather than date/time types."
             ),
-        ),
-        th.Property(
-            "use_pagination_for",
-            th.ObjectType(),
-            default={},
-            description=(
-                "Dictionary of stream names to use pagination for instead of streaming. Key is stream name, value is boolean. If true, pagination is used for that table."
-            ),
-        ),
-        th.Property(
-            "pagination_page_size",
-            th.IntegerType,
-            default=50000,
-            description=("Page size for pagination queries. Default is 50000 records per page."),
         ),
     ).to_dict()
 
